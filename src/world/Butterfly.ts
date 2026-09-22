@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
+import { FlightController } from "./FlightController.ts";
 
 export interface AssetDiagnostics {
   clipNames: string[];
@@ -33,7 +34,7 @@ export interface AssetDiagnostics {
 
 export class Butterfly {
   /**
-   * Root controller group for future flight position, rotation, scale, and trajectory logic.
+   * Root controller group for flight position, rotation, scale, and trajectory logic.
    * Internal GLB transforms should never be directly modified by flight behavior.
    */
   public readonly controller: THREE.Group;
@@ -42,6 +43,11 @@ export class Butterfly {
    * Intermediate model group holding the centered/normalized GLB.
    */
   public readonly modelGroup: THREE.Group;
+
+  /**
+   * Procedural 3D flight steering controller.
+   */
+  public readonly flight: FlightController;
 
   public mixer: THREE.AnimationMixer | null = null;
   public clips: THREE.AnimationClip[] = [];
@@ -57,27 +63,13 @@ export class Butterfly {
     this.modelGroup.name = "ModelGroup";
     this.controller.add(this.modelGroup);
 
-    // Initial cinematic composition placement on ButterflyController:
-    // Gracefully positioned below and to the right of "EXIST" (under "ST")
-    this.controller.rotation.set(0.46, -0.14, 0.04);
+    // Initialize dedicated procedural flight controller operating on ButterflyController
+    this.flight = new FlightController(this.controller);
     this.resize(window.innerWidth, window.innerHeight);
   }
 
   public resize(width: number, height: number): void {
-    const aspect = width / height;
-    if (aspect < 0.65) {
-      // Narrow mobile: clear separation below typography
-      this.controller.position.set(0.10, -1.40, 0.1);
-    } else if (aspect < 1.0) {
-      // Portrait tablet / large phone
-      this.controller.position.set(0.30, -1.10, 0.1);
-    } else if (aspect < 1.4) {
-      // Landscape tablet / square desktop
-      this.controller.position.set(0.50, -0.98, 0.1);
-    } else {
-      // Standard widescreen desktop: sits comfortably below-right of "EXIST"
-      this.controller.position.set(0.68, -0.94, 0.1);
-    }
+    this.flight.resize(width, height);
   }
 
   public async load(url: string = "/models/fantasy_butterfly_animation.glb"): Promise<void> {
@@ -121,6 +113,8 @@ export class Butterfly {
     this.clips = gltf.animations;
     if (this.clips.length > 0) {
       this.mixer = new THREE.AnimationMixer(model);
+      // Strictly keep authored animation playback speed
+      this.mixer.timeScale = 1.0;
 
       for (const clip of this.clips) {
         const action = this.mixer.clipAction(clip);
@@ -134,9 +128,15 @@ export class Butterfly {
     }
 
     this.isLoaded = true;
+    // Ensure idle rest timer begins when creature is visually established on screen
+    this.flight.resetToInitialPose();
   }
 
   public update(delta: number): void {
+    // 1. Procedural 3D flight steering (updates world position, rotation, banking on controller)
+    this.flight.update(delta);
+
+    // 2. Independent embedded wing animation playback at authored speed (timeScale = 1.0)
     if (this.mixer) {
       this.mixer.update(delta);
     }
