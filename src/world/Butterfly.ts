@@ -109,7 +109,44 @@ export class Butterfly {
       this.diagnostics.modelScale = scaleFactor;
     }
 
-    // 3. AnimationMixer and playback
+    // 3. Configure Wing & Body Material Alpha Handling
+    // The source GLB defines alphaMode: "MASK" and alphaCutoff: 1.0, but the bundled base-color PNG
+    // is a 24-bit RGB texture (colorType 2) where the background is pure pitch black (0, 0, 0).
+    // In WebGL, sampling RGB returns diffuseColor.a = 1.0 everywhere, so alphaTest < 1.0 is never true.
+    // Consequently, the transparent quad cards of the wings render as opaque black surfaces,
+    // writing depth and occluding overlapping wings, body, and tails.
+    // By detecting transparent black pixels (max(r, g, b) < 0.02) and assigning diffuseColor.a = 0.0
+    // with alphaTest = 0.5, Three.js discards the empty card regions at the fragment level.
+    // This eliminates the black wing card cutout artifact while preserving double-sided depth writing
+    // on the luminous artwork, emissive map glow, roughness (0.6), and metalness (0).
+    model.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        materials.forEach((mat) => {
+          if (mat instanceof THREE.MeshStandardMaterial) {
+            mat.alphaTest = 0.5;
+            mat.depthWrite = true;
+            mat.depthTest = true;
+            mat.side = THREE.DoubleSide;
+            mat.onBeforeCompile = (shader) => {
+              shader.fragmentShader = shader.fragmentShader.replace(
+                "#include <map_fragment>",
+                `
+                #include <map_fragment>
+                float maxDiffuse = max(max(sampledDiffuseColor.r, sampledDiffuseColor.g), sampledDiffuseColor.b);
+                diffuseColor.a = step(0.02, maxDiffuse);
+                `
+              );
+            };
+            mat.customProgramCacheKey = () => "butterflyMAT_alpha_discard";
+            mat.needsUpdate = true;
+          }
+        });
+      }
+    });
+
+    // 4. AnimationMixer and playback
     this.clips = gltf.animations;
     if (this.clips.length > 0) {
       this.mixer = new THREE.AnimationMixer(model);
