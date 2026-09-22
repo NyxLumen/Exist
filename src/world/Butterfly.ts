@@ -18,6 +18,7 @@ export interface AssetDiagnostics {
     hasNormalMap: boolean;
     hasRoughnessMap: boolean;
     hasEmissiveMap: boolean;
+    emissiveIntensity?: number;
   }>;
   textureCount: number;
   boundingBox: {
@@ -55,6 +56,28 @@ export class Butterfly {
     this.modelGroup = new THREE.Group();
     this.modelGroup.name = "ModelGroup";
     this.controller.add(this.modelGroup);
+
+    // Initial cinematic composition placement on ButterflyController:
+    // Gracefully positioned below and to the right of "EXIST" (under "ST")
+    this.controller.rotation.set(0.46, -0.14, 0.04);
+    this.resize(window.innerWidth, window.innerHeight);
+  }
+
+  public resize(width: number, height: number): void {
+    const aspect = width / height;
+    if (aspect < 0.65) {
+      // Narrow mobile: clear separation below typography
+      this.controller.position.set(0.10, -1.40, 0.1);
+    } else if (aspect < 1.0) {
+      // Portrait tablet / large phone
+      this.controller.position.set(0.30, -1.10, 0.1);
+    } else if (aspect < 1.4) {
+      // Landscape tablet / square desktop
+      this.controller.position.set(0.50, -0.98, 0.1);
+    } else {
+      // Standard widescreen desktop: sits comfortably below-right of "EXIST"
+      this.controller.position.set(0.68, -0.94, 0.1);
+    }
   }
 
   public async load(url: string = "/models/fantasy_butterfly_animation.glb"): Promise<void> {
@@ -85,9 +108,9 @@ export class Butterfly {
     model.position.set(-center.x, -center.y, -center.z);
     this.modelGroup.add(model);
 
-    // Sensible framing scale: normalize so maximum dimension is ~2.8 units in view
+    // Substantial focal presence: target span ~3.3 units so it feels living, intentional, and substantial
     const maxDimension = Math.max(size.x, size.y, size.z);
-    const targetSpan = 2.8;
+    const targetSpan = 3.3;
     const scaleFactor = maxDimension > 0 ? targetSpan / maxDimension : 1.0;
     this.modelGroup.scale.setScalar(scaleFactor);
     if (this.diagnostics) {
@@ -163,7 +186,8 @@ export class Butterfly {
         hasBaseMap: Boolean(std.map),
         hasNormalMap: Boolean(std.normalMap),
         hasRoughnessMap: Boolean(std.roughnessMap),
-        hasEmissiveMap: Boolean(std.emissiveMap)
+        hasEmissiveMap: Boolean(std.emissiveMap),
+        emissiveIntensity: std.emissiveIntensity
       });
     });
 

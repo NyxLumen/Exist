@@ -1,53 +1,103 @@
 import * as THREE from "three";
 
 /**
- * Environment setup for Phase 0.
+ * Environment setup for Phase 1: Cinematic Composition.
  *
- * NOTE: The lighting configured here is EXPLICITLY TEMPORARY for asset inspection.
- * In future phases, the butterfly itself will act as the primary dynamic light source.
+ * Establishes a minimal dark 3D space with physical surfaces (floor & backdrop)
+ * ready to receive light from the butterfly in future phases.
+ * Subdued baseline lighting keeps the environment subordinate and nearly black.
  */
 export class Environment {
   public readonly scene: THREE.Scene;
-  private readonly temporaryLights: THREE.Light[] = [];
+  private readonly disposableResources: { dispose: () => void }[] = [];
+
+  public floor: THREE.Mesh | null = null;
+  public backdrop: THREE.Mesh | null = null;
 
   constructor() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000000);
 
-    this.setupTemporaryInspectionLights();
+    // Subtle linear depth fog: preserves clear foreground while gently merging far geometry into black
+    this.scene.fog = new THREE.Fog(0x000000, 8, 26);
+
+    this.setupSurfaces();
+    this.setupBaselineLighting();
   }
 
   /**
-   * Temporary inspection lights to allow inspecting the GLB meshes, materials,
-   * textures, and animations against the pitch-black void.
+   * Minimal physical surfaces to establish 3D depth and prepare for dynamic light reception.
    */
-  private setupTemporaryInspectionLights(): void {
-    // Soft ambient illumination so shadow-sides and textures remain legible
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
-    ambientLight.name = "TempInspectionAmbientLight";
+  private setupSurfaces(): void {
+    // 1. Horizontal ground plane (floor)
+    const floorGeo = new THREE.PlaneGeometry(80, 80);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x050507,
+      roughness: 0.95,
+      metalness: 0.05
+    });
+    this.floor = new THREE.Mesh(floorGeo, floorMat);
+    this.floor.name = "EnvironmentFloor";
+    this.floor.rotation.x = -Math.PI / 2;
+    this.floor.position.set(0, -2.5, 0);
+    this.scene.add(this.floor);
+
+    this.disposableResources.push(floorGeo, floorMat);
+
+    // 2. Distant vertical backdrop plane
+    const backGeo = new THREE.PlaneGeometry(100, 60);
+    const backMat = new THREE.MeshStandardMaterial({
+      color: 0x030304,
+      roughness: 0.98,
+      metalness: 0.0
+    });
+    this.backdrop = new THREE.Mesh(backGeo, backMat);
+    this.backdrop.name = "EnvironmentBackdrop";
+    this.backdrop.position.set(0, 5, -14);
+    this.scene.add(this.backdrop);
+
+    this.disposableResources.push(backGeo, backMat);
+  }
+
+  /**
+   * Minimal baseline lighting: keeps the environment near-black while
+   * providing subtle form definition to the butterfly.
+   */
+  private setupBaselineLighting(): void {
+    // Ultra-low ambient light for atmospheric presence
+    const ambientLight = new THREE.AmbientLight(0x0a0d14, 0.5);
+    ambientLight.name = "BaselineAmbientLight";
     this.scene.add(ambientLight);
-    this.temporaryLights.push(ambientLight);
+    this.disposableResources.push(ambientLight);
 
-    // Key directional light from above-front
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.6);
-    keyLight.position.set(4, 6, 5);
-    keyLight.name = "TempInspectionKeyLight";
+    // Subtle directional key light from top-front
+    const keyLight = new THREE.DirectionalLight(0x141a28, 0.8);
+    keyLight.position.set(3, 6, 5);
+    keyLight.name = "BaselineKeyLight";
     this.scene.add(keyLight);
-    this.temporaryLights.push(keyLight);
+    this.disposableResources.push(keyLight);
 
-    // Rim/fill directional light from behind-left to reveal edges and silhouette
-    const rimLight = new THREE.DirectionalLight(0x88bbff, 1.0);
-    rimLight.position.set(-4, -2, -4);
-    rimLight.name = "TempInspectionRimLight";
+    // Faint rim light from below-rear to separate silhouettes against black backdrop
+    const rimLight = new THREE.DirectionalLight(0x0f1522, 0.4);
+    rimLight.position.set(-4, -1, -5);
+    rimLight.name = "BaselineRimLight";
     this.scene.add(rimLight);
-    this.temporaryLights.push(rimLight);
+    this.disposableResources.push(rimLight);
   }
 
   public dispose(): void {
-    for (const light of this.temporaryLights) {
-      this.scene.remove(light);
-      light.dispose();
+    if (this.floor) {
+      this.scene.remove(this.floor);
+      this.floor = null;
     }
-    this.temporaryLights.length = 0;
+    if (this.backdrop) {
+      this.scene.remove(this.backdrop);
+      this.backdrop = null;
+    }
+
+    for (const res of this.disposableResources) {
+      res.dispose();
+    }
+    this.disposableResources.length = 0;
   }
 }

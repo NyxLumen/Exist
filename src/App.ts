@@ -59,6 +59,7 @@ export class App {
 
     this.camera.resize(width, height);
     this.renderer.resize(width, height);
+    this.butterfly.resize(width, height);
   };
 
   public destroy(): void {
