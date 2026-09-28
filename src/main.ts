@@ -10,6 +10,12 @@ function init(): void {
 
   const app = new App(canvas);
 
+  // Allow clean inspection of the 3D creature without text interference when requested
+  if (window.location.search.includes("hideText")) {
+    const overlay = document.querySelector(".hero-overlay") as HTMLElement | null;
+    if (overlay) overlay.style.display = "none";
+  }
+
   // Expose on window for runtime testing and inspection
   (window as unknown as { __EXIST_APP__: App }).__EXIST_APP__ = app;
 }

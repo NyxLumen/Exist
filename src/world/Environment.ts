@@ -39,7 +39,7 @@ export class Environment {
     this.floor = new THREE.Mesh(floorGeo, floorMat);
     this.floor.name = "EnvironmentFloor";
     this.floor.rotation.x = -Math.PI / 2;
-    this.floor.position.set(0, -2.5, 0);
+    this.floor.position.set(0, -4.2, 0);
     this.scene.add(this.floor);
 
     this.disposableResources.push(floorGeo, floorMat);
@@ -60,26 +60,33 @@ export class Environment {
   }
 
   /**
-   * Minimal baseline lighting: keeps the environment near-black while
-   * providing subtle form definition to the butterfly.
+   * Studio lighting for Stage 1: Procedural Silhouette evaluation.
+   * High-definition key, fill, and rim lights reveal form, edge curvature, and silhouette.
    */
   private setupBaselineLighting(): void {
-    // Ultra-low ambient light for atmospheric presence
-    const ambientLight = new THREE.AmbientLight(0x0a0d14, 0.5);
+    // Ambient light for clear ambient fill
+    const ambientLight = new THREE.AmbientLight(0x3a4556, 1.2);
     ambientLight.name = "BaselineAmbientLight";
     this.scene.add(ambientLight);
     this.disposableResources.push(ambientLight);
 
-    // Subtle directional key light from top-front
-    const keyLight = new THREE.DirectionalLight(0x141a28, 0.8);
-    keyLight.position.set(3, 6, 5);
+    // Sculpted key light from top-right-front
+    const keyLight = new THREE.DirectionalLight(0xf4f7fa, 2.2);
+    keyLight.position.set(4, 5, 6);
     keyLight.name = "BaselineKeyLight";
     this.scene.add(keyLight);
     this.disposableResources.push(keyLight);
 
-    // Faint rim light from below-rear to separate silhouettes against black backdrop
-    const rimLight = new THREE.DirectionalLight(0x0f1522, 0.4);
-    rimLight.position.set(-4, -1, -5);
+    // Soft cool fill light from left-front
+    const fillLight = new THREE.DirectionalLight(0x70859e, 1.2);
+    fillLight.position.set(-5, -2, 4);
+    fillLight.name = "BaselineFillLight";
+    this.scene.add(fillLight);
+    this.disposableResources.push(fillLight);
+
+    // Pronounced rim backlight to sculpt the wing silhouette against dark backdrop
+    const rimLight = new THREE.DirectionalLight(0xdbe7f5, 2.5);
+    rimLight.position.set(0, 4, -5);
     rimLight.name = "BaselineRimLight";
     this.scene.add(rimLight);
     this.disposableResources.push(rimLight);
