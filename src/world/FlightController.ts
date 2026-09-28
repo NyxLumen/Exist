@@ -158,22 +158,22 @@ export class FlightController {
       minSpeed: config.minSpeed ?? 0.12,
       maxSpeed: config.maxSpeed ?? 0.65,
       cruiseSpeed: config.cruiseSpeed ?? 0.38,
-      propulsionStrength: config.propulsionStrength ?? 0.95,
-      steeringResponse: config.steeringResponse ?? 2.4,
-      maxSteeringForce: config.maxSteeringForce ?? 1.15,
+      propulsionStrength: config.propulsionStrength ?? 1.05,
+      steeringResponse: config.steeringResponse ?? 2.6,
+      maxSteeringForce: config.maxSteeringForce ?? 1.25,
       dragCoefficient: config.dragCoefficient ?? 0.82,
-      liftRatio: config.liftRatio ?? 0.85,
-      bankStrength: config.bankStrength ?? 0.26,
-      maxBankAngle: config.maxBankAngle ?? 0.22,
-      bankDamping: config.bankDamping ?? 3.5,
-      rotationInertiaDamping: config.rotationInertiaDamping ?? 6.2,
+      liftRatio: config.liftRatio ?? 0.92,
+      bankStrength: config.bankStrength ?? 0.28,
+      maxBankAngle: config.maxBankAngle ?? 0.24,
+      bankDamping: config.bankDamping ?? 3.8,
+      rotationInertiaDamping: config.rotationInertiaDamping ?? 7.2,
       wanderRate: config.wanderRate ?? 0.45,
       wanderPersistence: config.wanderPersistence ?? 1.2,
       energyBurnRate: config.energyBurnRate ?? 0.035,
-      energyRecoveryRate: config.energyRecoveryRate ?? 0.05,
-      glideProbability: config.glideProbability ?? 0.18,
-      glideDurationMin: config.glideDurationMin ?? 0.9,
-      glideDurationMax: config.glideDurationMax ?? 2.2,
+      energyRecoveryRate: config.energyRecoveryRate ?? 0.055,
+      glideProbability: config.glideProbability ?? 0.20,
+      glideDurationMin: config.glideDurationMin ?? 1.0,
+      glideDurationMax: config.glideDurationMax ?? 2.3,
       containmentStiffness: config.containmentStiffness ?? 0.42,
       safeSpan: config.safeSpan ?? { x: 1.45, y: 0.80, z: 0.60 },
       margin: config.margin ?? { x: 0.50, y: 0.40, z: 0.30 }
@@ -353,13 +353,20 @@ export class FlightController {
     this.intentDepthAngle += this.intentDepthRate * delta;
 
     // Constrain depth angle to prevent extreme pitch flips
-    this.intentDepthAngle = THREE.MathUtils.clamp(this.intentDepthAngle, -0.45, 0.45);
+    this.intentDepthAngle = THREE.MathUtils.clamp(this.intentDepthAngle, -0.42, 0.42);
+
+    // Biological multi-harmonic undulations in elevation and heading
+    // Prevents sterile planar flight while maintaining physical plausibility
+    const harmonicPitch = Math.sin(this.flightTime * 0.42) * 0.12 + Math.cos(this.flightTime * 0.95) * 0.05;
+    const effectiveDepth = THREE.MathUtils.clamp(this.intentDepthAngle + harmonicPitch, -0.45, 0.45);
+    const microYaw = Math.sin(this.flightTime * 1.65) * 0.035 + Math.cos(this.flightTime * 2.85) * 0.015;
+    const effectivePlane = this.intentPlaneAngle + microYaw;
 
     // Reconstruct 3D intent unit vector
-    const cosDepth = Math.cos(this.intentDepthAngle);
-    let dirX = Math.cos(this.intentPlaneAngle) * cosDepth;
-    let dirY = Math.sin(this.intentPlaneAngle) * cosDepth;
-    let dirZ = Math.sin(this.intentDepthAngle);
+    const cosDepth = Math.cos(effectiveDepth);
+    let dirX = Math.cos(effectivePlane) * cosDepth;
+    let dirY = Math.sin(effectivePlane) * cosDepth;
+    let dirZ = Math.sin(effectiveDepth);
 
     // Soft Intent Bias: if drifting towards boundary, intent gently turns back towards center
     const dx = this.position.x - this.center.x;
@@ -385,9 +392,12 @@ export class FlightController {
 
     this.desiredDirection.set(dirX, dirY, dirZ).normalize();
 
-    // Modulate desired speed with energy and flight rhythm
-    const baseCruise = THREE.MathUtils.lerp(this.config.minSpeed, this.config.cruiseSpeed, this.energy);
-    this.targetSpeed = this.isGliding ? this.config.minSpeed * 0.95 : baseCruise;
+    // Biological speed rhythm: flurries vs gentle cruising
+    const speedRhythm = Math.sin(this.flightTime * 0.65) * 0.06 + Math.cos(this.flightTime * 1.4) * 0.03;
+    const baseCruise = THREE.MathUtils.lerp(this.config.minSpeed, this.config.cruiseSpeed + speedRhythm, this.energy);
+    this.targetSpeed = this.isGliding
+      ? this.config.minSpeed * 0.92
+      : THREE.MathUtils.clamp(baseCruise, this.config.minSpeed, this.config.maxSpeed);
   }
 
   /**
@@ -400,7 +410,7 @@ export class FlightController {
     if (this.isGliding) {
       this.glideTimer -= delta;
       // Energy recovers smoothly during effortless glide
-      this.energy += this.config.energyRecoveryRate * delta;
+      this.energy += this.config.energyRecoveryRate * 1.4 * delta;
       this.energy = Math.min(1.0, this.energy);
 
       if (this.glideTimer <= 0 || this.speed < this.config.minSpeed * 1.05) {
@@ -408,15 +418,23 @@ export class FlightController {
         this.timeSinceLastGlide = 0;
       }
     } else {
-      // Energy expends proportionally to speed and vertical climb
-      const climbCost = Math.max(0, this.velocity.y) * 0.06;
+      // Active flapping energy dynamics
+      const climbCost = Math.max(0, this.velocity.y) * 0.08;
       const speedCost = (this.speed / this.config.cruiseSpeed) * this.config.energyBurnRate;
-      this.energy -= (speedCost + climbCost) * delta;
-      this.energy = Math.max(0.18, this.energy);
+      const burn = (speedCost + climbCost) * delta;
 
-      // Opportunistic glide trigger: after climbing burst, high speed, or cruising ease
-      const canGlide = this.timeSinceLastGlide > 4.5 && this.energy > 0.45;
-      if (canGlide && this.velocity.y < 0.08) {
+      // Recovery occurs during relaxed descent or slower cruising
+      let recovery = 0;
+      if (this.speed < this.config.cruiseSpeed * 0.88 || this.velocity.y < -0.04) {
+        recovery = this.config.energyRecoveryRate * 0.70 * delta;
+      }
+
+      this.energy = THREE.MathUtils.clamp(this.energy - burn + recovery, 0.22, 1.0);
+
+      // Opportunistic glide trigger: can trigger when rested OR when descending/coasting
+      const canGlide = (this.timeSinceLastGlide > 3.6 && this.energy > 0.35) ||
+                       (this.timeSinceLastGlide > 5.5 && this.velocity.y <= 0.02);
+      if (canGlide && this.velocity.y < 0.12) {
         const roll = Math.abs(this.nextRandom());
         if (roll < this.config.glideProbability * delta * 5.0) {
           this.isGliding = true;
@@ -445,25 +463,26 @@ export class FlightController {
     if (this.isGliding) {
       propMag *= 0.08; // Glide has minimal active thrust
     } else {
-      // Downstroke coupling: wing push produces subtle forward thrust modulation
-      propMag *= (1.0 + 0.18 * downstrokeImpulse);
+      // Episodic wing push: pulses forward during downstroke, drops to baseline coast during upstroke
+      propMag *= (0.50 + 0.85 * downstrokeImpulse);
       propMag *= (0.65 + 0.35 * this.energy);
     }
     this._propulsionForce.copy(this.direction).multiplyScalar(propMag);
 
-    // 2. Steering Force (Reynolds autonomous vehicle steering towards desired velocity)
+    // 2. Dynamic Steering Force with biological variance (not rigid mechanical tracking)
+    const dynamicSteerGain = this.config.steeringResponse * (0.82 + 0.28 * Math.sin(this.flightTime * 0.82) + 0.14 * Math.cos(this.flightTime * 1.65));
     this._desiredVel.copy(this.desiredDirection).multiplyScalar(this.targetSpeed);
-    this.steeringForce.subVectors(this._desiredVel, this.velocity).multiplyScalar(this.config.steeringResponse);
+    this.steeringForce.subVectors(this._desiredVel, this.velocity).multiplyScalar(dynamicSteerGain);
     this.steeringForce.clampLength(0, this.config.maxSteeringForce);
 
     // 3. Aerodynamic Lift & Vertical Control
     let liftMag = 0;
     if (!this.isGliding) {
-      // Downstroke lift pulse
-      liftMag = downstrokeImpulse * 0.12 * this.config.liftRatio;
+      // Downstroke lift pulse with subtle settling between strokes: produces living vertical bob
+      liftMag = (downstrokeImpulse * 0.42 - 0.10) * this.config.liftRatio;
     } else {
       // Aerodynamic glide lift scaling with speed squared
-      liftMag = Math.min(0.20, (this.speed * this.speed) * 0.45);
+      liftMag = Math.min(0.22, (this.speed * this.speed) * 0.48);
     }
     this._liftForce.set(0, liftMag, 0);
 

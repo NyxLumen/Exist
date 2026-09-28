@@ -46,8 +46,8 @@ export class Butterfly {
     this.modelGroup.add(this.procedural.group);
 
     // Wingspan in procedural geometry is ~4.0 units across
-    // Scale factor can be normalized or slightly adjusted for dramatic focal presence
-    this.modelGroup.scale.setScalar(1.0);
+    // Scale factor scaled down to 70% to provide elegant breathing room around typography
+    this.modelGroup.scale.setScalar(0.70);
 
     this.isLoaded = true;
     this.flight.resetToInitialPose();

@@ -61,7 +61,7 @@ function init(): void {
       0.10
     );
     velArrow.name = "DebugVelocityArrow";
-    app.scene.instance.add(velArrow);
+    app.environment.scene.add(velArrow);
 
     const headArrow = new THREE.ArrowHelper(
       new THREE.Vector3(0, 1, 0),
@@ -72,7 +72,7 @@ function init(): void {
       0.08
     );
     headArrow.name = "DebugHeadArrow";
-    app.scene.instance.add(headArrow);
+    app.environment.scene.add(headArrow);
 
     const _scratchHead = new THREE.Vector3();
     const _scratchVel = new THREE.Vector3();
