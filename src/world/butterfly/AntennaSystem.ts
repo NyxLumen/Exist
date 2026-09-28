@@ -33,6 +33,36 @@ export class AntennaSystem {
     this.group.add(this.rightAntennaGroup);
   }
 
+  // Inertial tracking state
+  private leftPitch: number = 0;
+  private leftYaw: number = 0;
+  private rightPitch: number = 0;
+  private rightYaw: number = 0;
+
+  /**
+   * Applies secondary inertial response:
+   * Antennae lag behind body pitch, acceleration, and wing flap air vortices.
+   */
+  public update(delta: number, flapVelocity: number, bodyPitch: number, bank: number): void {
+    // Air vortex push from wing stroke + body pitch lag
+    const targetPitch = -bodyPitch * 0.75 - flapVelocity * 0.016;
+
+    // Banking drag and subtle micro-quiver
+    const targetLeftYaw = bank * 0.22;
+    const targetRightYaw = bank * 0.22;
+
+    // Critically damped settling: smooth, organic, zero jitter
+    const decay = 1 - Math.exp(-6.5 * delta);
+
+    this.leftPitch += (targetPitch - this.leftPitch) * decay;
+    this.rightPitch += (targetPitch - this.rightPitch) * decay;
+    this.leftYaw += (targetLeftYaw - this.leftYaw) * decay;
+    this.rightYaw += (targetRightYaw - this.rightYaw) * decay;
+
+    this.leftAntennaGroup.rotation.set(this.leftPitch, 0, this.leftYaw);
+    this.rightAntennaGroup.rotation.set(this.rightPitch, 0, -this.rightYaw);
+  }
+
   /**
    * Generates a tapered curved tube for one antenna.
    */

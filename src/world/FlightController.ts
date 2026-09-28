@@ -24,6 +24,7 @@ export class FlightController {
   public readonly velocity: THREE.Vector3 = new THREE.Vector3();
   public speed: number = 0;
   public bank: number = 0;
+  public enabled: boolean = true;
 
   // Physical parameters
   private readonly minSpeed: number = 0.14; // Near-hover wander speed
@@ -110,6 +111,7 @@ export class FlightController {
   }
 
   public update(delta: number): void {
+    if (!this.enabled) return;
     this.flightTime += delta;
 
     // 1. Initial Resting Phase (~1.8s)

@@ -12,6 +12,9 @@ export class App {
   public readonly environment: Environment;
   public readonly butterfly: Butterfly;
 
+  public fixedPhase: number | null = null;
+  public fixedTime: number | null = null;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
 
@@ -30,7 +33,14 @@ export class App {
 
     // 3. Register Loop Tick
     this.loop.add((delta: number) => {
-      this.butterfly.update(delta);
+      if (this.fixedPhase !== null) {
+        this.butterfly.procedural.evaluateAtPhase(
+          this.fixedPhase,
+          this.fixedTime !== null ? this.fixedTime : this.fixedPhase * 2.5
+        );
+      } else {
+        this.butterfly.update(delta);
+      }
       this.renderer.render(this.environment.scene, this.camera.instance);
     });
 

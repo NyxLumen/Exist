@@ -66,7 +66,7 @@ export class Butterfly {
     this.flight.update(delta);
 
     // 2. Procedural creature internal update
-    this.procedural.update(delta);
+    this.procedural.update(delta, this.flight.speed, this.flight.bank);
   }
 
   public dispose(): void {
