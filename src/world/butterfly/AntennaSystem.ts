@@ -6,22 +6,81 @@ import * as THREE from "three";
  * - Tapered tube geometry with terminal apical teardrop droplets
  * - Independent left and right antenna groups for secondary motion integration
  */
+export interface AntennaMotionConfig {
+  /** Critically damped settling rate (default: 6.5) */
+  damping?: number;
+  /** Forward acceleration reaction scale (default: 1.0) */
+  accelResponse?: number;
+  /** Wing downwash impulse reaction scale (default: 1.0) */
+  downwashResponse?: number;
+  /** Angular turning lag scale (default: 1.0) */
+  turnResponse?: number;
+  /** Ambient desynchronized micro-motion scale (default: 0.005) */
+  microMotionScale?: number;
+  /** Whether antennae are mounted directly to the head frame (default: true) */
+  isMountedOnHead?: boolean;
+}
+
+/**
+ * AntennaSystem manages the twin sweeping antennae:
+ * - Proud, sweeping 3D Catmull-Rom crescent arcs curving forward and outward
+ * - Tapered tube geometry with terminal apical teardrop droplets
+ * - Independent left and right antenna groups for secondary motion integration
+ * - Cranial attachment with damped inertia reacting to flight acceleration, turning, and wing downwash
+ */
 export class AntennaSystem {
   public readonly group: THREE.Group;
   public readonly leftAntennaGroup: THREE.Group;
   public readonly rightAntennaGroup: THREE.Group;
 
-  constructor(material: THREE.Material, beadMaterial?: THREE.Material) {
+  // Tunable configuration
+  public damping: number;
+  public accelResponse: number;
+  public downwashResponse: number;
+  public turnResponse: number;
+  public microMotionScale: number;
+
+  // Inertial tracking state
+  private leftPitch: number = 0;
+  private leftYaw: number = 0;
+  private leftRoll: number = 0;
+  private rightPitch: number = 0;
+  private rightYaw: number = 0;
+  private rightRoll: number = 0;
+
+  // Environmental micro-tremor timeline
+  private microTimeline: number = 0;
+
+  constructor(
+    material: THREE.Material,
+    beadMaterial?: THREE.Material,
+    config: AntennaMotionConfig = {}
+  ) {
     this.group = new THREE.Group();
     this.group.name = "AntennaSystem";
 
+    this.damping = config.damping ?? 6.5;
+    this.accelResponse = config.accelResponse ?? 1.0;
+    this.downwashResponse = config.downwashResponse ?? 1.0;
+    this.turnResponse = config.turnResponse ?? 1.0;
+    this.microMotionScale = config.microMotionScale ?? 0.005;
+
+    const isMountedOnHead = config.isMountedOnHead ?? true;
+
     this.leftAntennaGroup = new THREE.Group();
     this.leftAntennaGroup.name = "LeftAntennaGroup";
-    this.leftAntennaGroup.position.set(-0.038, 0.28, 0.05);
-
     this.rightAntennaGroup = new THREE.Group();
     this.rightAntennaGroup.name = "RightAntennaGroup";
-    this.rightAntennaGroup.position.set(0.038, 0.28, 0.05);
+
+    if (isMountedOnHead) {
+      // Anchored to cranium in headGroup local frame: cranium center is at (0, 0, 0), apex is at y ~ 0.06, z ~ 0.02
+      this.leftAntennaGroup.position.set(-0.038, 0.06, 0.02);
+      this.rightAntennaGroup.position.set(0.038, 0.06, 0.02);
+    } else {
+      // Standalone coordinates relative to body root
+      this.leftAntennaGroup.position.set(-0.038, 0.28, 0.05);
+      this.rightAntennaGroup.position.set(0.038, 0.28, 0.05);
+    }
 
     const leftMesh = this.buildAntennaMesh(false, material, beadMaterial ?? material);
     const rightMesh = this.buildAntennaMesh(true, material, beadMaterial ?? material);
@@ -33,34 +92,58 @@ export class AntennaSystem {
     this.group.add(this.rightAntennaGroup);
   }
 
-  // Inertial tracking state
-  private leftPitch: number = 0;
-  private leftYaw: number = 0;
-  private rightPitch: number = 0;
-  private rightYaw: number = 0;
-
   /**
    * Applies secondary inertial response:
-   * Antennae lag behind body pitch, acceleration, and wing flap air vortices.
+   * Antennae lag behind acceleration, turning, body pitch, and wing flap downwash vortices.
    */
-  public update(delta: number, flapVelocity: number, bodyPitch: number, bank: number): void {
-    // Air vortex push from wing stroke + body pitch lag
-    const targetPitch = -bodyPitch * 0.75 - flapVelocity * 0.016;
+  public update(
+    delta: number,
+    flapVelocity: number,
+    downstrokeImpulse: number = 0,
+    bodyPitch: number = 0,
+    bank: number = 0,
+    accelForward: number = 0,
+    angularYaw: number = 0
+  ): void {
+    this.microTimeline += delta;
 
-    // Banking drag and subtle micro-quiver
-    const targetLeftYaw = bank * 0.22;
-    const targetRightYaw = bank * 0.22;
+    // 1. Aerodynamic downwash impulse from wing downstroke + body pitch lag
+    const downwash = (-downstrokeImpulse * 0.016 - flapVelocity * 0.012) * this.downwashResponse;
+    const accelPitchLag = -accelForward * 0.024 * this.accelResponse;
+    const targetPitch = -bodyPitch * 0.70 + downwash + accelPitchLag;
 
-    // Critically damped settling: smooth, organic, zero jitter
-    const decay = 1 - Math.exp(-6.5 * delta);
+    // 2. Turning drag and centripetal yaw lag
+    const turnLag = -angularYaw * 0.035 * this.turnResponse;
+    const bankDrag = bank * 0.20;
 
-    this.leftPitch += (targetPitch - this.leftPitch) * decay;
-    this.rightPitch += (targetPitch - this.rightPitch) * decay;
+    // 3. Ethereal ambient micro-tremor (desynchronized frequencies break symmetry)
+    const t = this.microTimeline;
+    const microPitchL = (Math.sin(t * 2.7) * 0.7 + Math.cos(t * 4.3 + 0.5) * 0.3) * this.microMotionScale;
+    const microPitchR = (Math.sin(t * 2.9 + 1.1) * 0.7 + Math.cos(t * 4.1 + 1.8) * 0.3) * this.microMotionScale;
+    const microYawL = Math.sin(t * 3.3 + 0.7) * this.microMotionScale * 0.8;
+    const microYawR = Math.sin(t * 3.1 + 2.2) * this.microMotionScale * 0.8;
+
+    const targetLeftPitch = targetPitch + microPitchL;
+    const targetRightPitch = targetPitch + microPitchR;
+
+    const targetLeftYaw = bankDrag + turnLag + microYawL;
+    const targetRightYaw = bankDrag + turnLag + microYawR;
+
+    // 4. Critically damped settling: smooth, organic, zero jitter
+    const decay = 1 - Math.exp(-this.damping * delta);
+
+    this.leftPitch += (targetLeftPitch - this.leftPitch) * decay;
+    this.rightPitch += (targetRightPitch - this.rightPitch) * decay;
     this.leftYaw += (targetLeftYaw - this.leftYaw) * decay;
     this.rightYaw += (targetRightYaw - this.rightYaw) * decay;
 
-    this.leftAntennaGroup.rotation.set(this.leftPitch, 0, this.leftYaw);
-    this.rightAntennaGroup.rotation.set(this.rightPitch, 0, -this.rightYaw);
+    // Subtle axial twist responding to turn
+    const targetRoll = -bank * 0.08;
+    this.leftRoll += (targetRoll - this.leftRoll) * decay;
+    this.rightRoll += (targetRoll - this.rightRoll) * decay;
+
+    this.leftAntennaGroup.rotation.set(this.leftPitch, this.leftRoll, this.leftYaw);
+    this.rightAntennaGroup.rotation.set(this.rightPitch, -this.rightRoll, -this.rightYaw);
   }
 
   /**

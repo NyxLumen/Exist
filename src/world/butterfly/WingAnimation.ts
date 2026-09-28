@@ -14,6 +14,7 @@ export interface WingAnimationOutputs {
   rightHindwing: WingStrokeState;
   bodyBob: number;
   bodyPitch: number;
+  downstrokeImpulse: number;
 }
 
 /**
@@ -104,6 +105,7 @@ export class WingAnimation {
     const avgFlapVel = (leftFore.flapVelocity + rightFore.flapVelocity) * 0.5;
     const bodyBob = -avgFlapVel * 0.0035; // Gentle ~0.018 unit max heave
     const bodyPitch = -avgFlapVel * 0.0055; // Gentle ~0.028 rad (~1.6 deg) max counter-pitch
+    const downstrokeImpulse = leftFore.isDownstroke ? Math.max(0, -avgFlapVel) : 0;
 
     return {
       leftForewing: leftFore,
@@ -111,7 +113,8 @@ export class WingAnimation {
       leftHindwing: leftHind,
       rightHindwing: rightHind,
       bodyBob,
-      bodyPitch
+      bodyPitch,
+      downstrokeImpulse
     };
   }
 
@@ -159,6 +162,7 @@ export class WingAnimation {
     const avgFlapVel = (leftFore.flapVelocity + rightFore.flapVelocity) * 0.5;
     const bodyBob = -avgFlapVel * 0.0035;
     const bodyPitch = -avgFlapVel * 0.0055;
+    const downstrokeImpulse = leftFore.isDownstroke ? Math.max(0, -avgFlapVel) : 0;
 
     return {
       leftForewing: leftFore,
@@ -166,7 +170,8 @@ export class WingAnimation {
       leftHindwing: leftHind,
       rightHindwing: rightHind,
       bodyBob,
-      bodyPitch
+      bodyPitch,
+      downstrokeImpulse
     };
   }
 

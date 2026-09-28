@@ -1,5 +1,16 @@
 import * as THREE from "three";
 
+export interface FlightMotionState {
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  acceleration: THREE.Vector3;
+  angularVelocity: THREE.Vector3;
+  direction: THREE.Vector3;
+  speed: number;
+  bank: number;
+  flightTime: number;
+}
+
 /**
  * Inertial Butterfly Flight Controller.
  *
@@ -19,9 +30,13 @@ export class FlightController {
   private readonly idleDuration: number = 1.8; // Initial resting period
   private readonly liftoffDuration: number = 2.5; // Smooth gradual awakening
 
-  // Kinematics
+  // Kinematics & Clean Motion Telemetry (Read-only for secondary motion)
   public readonly position: THREE.Vector3 = new THREE.Vector3();
   public readonly velocity: THREE.Vector3 = new THREE.Vector3();
+  public readonly acceleration: THREE.Vector3 = new THREE.Vector3();
+  public readonly angularVelocity: THREE.Vector3 = new THREE.Vector3();
+  public readonly direction: THREE.Vector3 = new THREE.Vector3(0, 0, 1);
+  public readonly motionState: FlightMotionState;
   public speed: number = 0;
   public bank: number = 0;
   public enabled: boolean = true;
@@ -56,21 +71,38 @@ export class FlightController {
   private readonly _forwardAxis = new THREE.Vector3(0, 0, 1);
   private readonly _targetQuat = new THREE.Quaternion();
   private readonly _bankQuat = new THREE.Quaternion();
+  private readonly _prevQuat = new THREE.Quaternion();
+  private readonly _deltaQuat = new THREE.Quaternion();
+  private readonly _deltaEuler = new THREE.Euler(0, 0, 0, "XYZ");
   private readonly _microOffset = new THREE.Vector3();
 
   constructor(root: THREE.Group) {
     this.root = root;
+    this.motionState = {
+      position: this.position,
+      velocity: this.velocity,
+      acceleration: this.acceleration,
+      angularVelocity: this.angularVelocity,
+      direction: this.direction,
+      speed: 0,
+      bank: 0,
+      flightTime: 0
+    };
     this.resetToInitialPose();
   }
 
   public resetToInitialPose(): void {
     this.position.copy(this.initialPosition);
     this.velocity.set(0, 0, 0);
+    this.acceleration.set(0, 0, 0);
+    this.angularVelocity.set(0, 0, 0);
+    this.direction.set(0, 0, 1);
     this.speed = 0;
     this.bank = 0;
     this.flightTime = 0;
     this.root.position.copy(this.position);
     this.root.quaternion.copy(this.initialQuat);
+    this._prevQuat.copy(this.initialQuat);
   }
 
   public setInitialPosition(x: number, y: number, z: number): void {
@@ -125,6 +157,14 @@ export class FlightController {
         this.position.z
       );
       this.root.quaternion.copy(this.initialQuat);
+      this._prevQuat.copy(this.initialQuat);
+
+      this.acceleration.set(0, 0, 0);
+      this.angularVelocity.set(0, 0, 0);
+      this.direction.set(0, 0, 1);
+      this.motionState.speed = 0;
+      this.motionState.bank = 0;
+      this.motionState.flightTime = this.flightTime;
       return;
     }
 
@@ -211,6 +251,7 @@ export class FlightController {
     this.position.addScaledVector(this.velocity, delta);
 
     // 8. Orientation Derived from ACTUAL VELOCITY with Rotational Lag
+    this._prevQuat.copy(this.root.quaternion);
     if (this.speed > 0.025) {
       this._actualForward.copy(this.velocity).normalize();
 
@@ -239,6 +280,30 @@ export class FlightController {
     } else if (liftoffRamp < 0.1) {
       this.root.quaternion.copy(this.initialQuat);
     }
+
+    // Telemetry tracking for secondary creature motion (zero heap allocation)
+    if (delta > 0.0001) {
+      this._deltaQuat.copy(this._prevQuat).invert().multiply(this.root.quaternion);
+      this._deltaEuler.setFromQuaternion(this._deltaQuat, "XYZ");
+      this.angularVelocity.set(
+        THREE.MathUtils.clamp(this._deltaEuler.x / delta, -5, 5),
+        THREE.MathUtils.clamp(this._deltaEuler.y / delta, -5, 5),
+        THREE.MathUtils.clamp(this._deltaEuler.z / delta, -5, 5)
+      );
+    } else {
+      this.angularVelocity.set(0, 0, 0);
+    }
+
+    this.acceleration.copy(this._accel);
+    if (this.speed > 0.001) {
+      this.direction.copy(this.velocity).multiplyScalar(1 / this.speed);
+    } else {
+      this.direction.set(0, 0, 1);
+    }
+
+    this.motionState.speed = this.speed;
+    this.motionState.bank = this.bank;
+    this.motionState.flightTime = this.flightTime;
 
     // 9. Very Subtle Organic Micro-Movement (air-current floatiness)
     const microX = Math.sin(t * 1.3) * 0.010 + Math.cos(t * 2.7) * 0.005;

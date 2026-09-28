@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BodyGeometry } from "./BodyGeometry.ts";
+import { BodyGeometry, BodyParts } from "./BodyGeometry.ts";
 import { AntennaSystem } from "./AntennaSystem.ts";
 import { WingGeometry } from "./WingGeometry.ts";
 import { TrailingStreamers } from "./TrailingStreamers.ts";
@@ -7,6 +7,7 @@ import { WingAnimation } from "./WingAnimation.ts";
 import { WingDeformation } from "./WingDeformation.ts";
 import { StreamerDeformation } from "./StreamerDeformation.ts";
 import { BodyMotion } from "./BodyMotion.ts";
+import { FlightMotionState } from "../FlightController.ts";
 
 export interface ProceduralButterflyConfig {
   neutralMaterial?: boolean;
@@ -17,11 +18,15 @@ export interface ProceduralButterflyConfig {
  * - Decoupled modular subsystems (Body, Antenna, Wings, Streamers, Animation, Deformation)
  * - Stage 2: GPU-side aeroelastic wing deformation, asymmetric flap kinematics,
  *   subtle bilateral asymmetry, secondary antenna inertia, and fluid streamer wave dynamics.
+ * - Stage 3: Bioluminescent chitin, luminous eye facets, glowing antenna beads, ocelli.
+ * - Stage 4: Secondary creature motion: dynamic thorax reaction, progressive 7-segment abdomen inertia,
+ *   cranial-anchored antennae lag, velocity-trailing streamers, and subconscious biological pulse.
  */
 export class ProceduralButterfly {
   public readonly group: THREE.Group;
 
   // Subsystem instances & groups
+  public readonly bodyParts: BodyParts;
   public readonly bodyGroup: THREE.Group;
   public readonly antennaSystem: AntennaSystem;
   public readonly bodyMotion: BodyMotion;
@@ -93,14 +98,15 @@ export class ProceduralButterfly {
     });
     this.materials.push(beadMat);
 
-    // 3. Build Procedural Body & Motion
-    this.bodyGroup = BodyGeometry.createBody(bodyMat, eyeMat);
-    this.bodyMotion = new BodyMotion(this.bodyGroup);
+    // 3. Build Procedural Body & Articulated Motion
+    this.bodyParts = BodyGeometry.createBody(bodyMat, eyeMat);
+    this.bodyGroup = this.bodyParts.root;
+    this.bodyMotion = new BodyMotion(this.bodyParts);
     this.group.add(this.bodyGroup);
 
-    // 4. Build Antenna System & Append
-    this.antennaSystem = new AntennaSystem(bodyMat, beadMat);
-    this.group.add(this.antennaSystem.group);
+    // 4. Build Antenna System & Anchor to Cranial Head Frame
+    this.antennaSystem = new AntennaSystem(bodyMat, beadMat, { isMountedOnHead: true });
+    this.bodyParts.head.add(this.antennaSystem.group);
 
     // 5. Configure Wing Pivots at thoracic hinge sockets
     this.leftForewingPivot = new THREE.Group();
@@ -199,34 +205,86 @@ export class ProceduralButterfly {
 
   /**
    * Main procedural animation update:
-   * Coordinates kinematics, GPU deformation uniforms, antenna inertia, body bob, and streamer waves.
+   * Coordinates Primary Wingbeat -> Secondary Body & Orientation -> Tertiary Antennae, Streamers & Biological Pulse.
    */
-  public update(delta: number, speed: number = 0, bank: number = 0): void {
+  public update(delta: number, motionOrSpeed: number | FlightMotionState = 0, bank: number = 0): void {
     this.elapsedTime += delta;
 
-    // 1. Evaluate asymmetric flapping kinematics
-    const stroke = this.wingAnimation.update(delta, speed, bank);
+    let speed = 0;
+    let bankVal = bank;
+    let accelForward = 0;
+    let accelLateral = 0;
+    let angularPitch = 0;
+    let angularYaw = 0;
 
-    // 2. Update GPU vertex deformation uniforms for each wing
+    if (typeof motionOrSpeed === "object" && motionOrSpeed !== null) {
+      speed = motionOrSpeed.speed;
+      bankVal = motionOrSpeed.bank;
+
+      // Longitudinal acceleration
+      accelForward = motionOrSpeed.acceleration.dot(motionOrSpeed.direction);
+
+      // Lateral acceleration along right vector
+      const rx = -motionOrSpeed.direction.z;
+      const rz = motionOrSpeed.direction.x;
+      const rLen = Math.hypot(rx, rz);
+      if (rLen > 0.001) {
+        accelLateral = (motionOrSpeed.acceleration.x * rx + motionOrSpeed.acceleration.z * rz) / rLen;
+      }
+
+      angularPitch = motionOrSpeed.angularVelocity.x;
+      angularYaw = motionOrSpeed.angularVelocity.y;
+    } else {
+      speed = motionOrSpeed;
+      bankVal = bank;
+    }
+
+    // 1. PRIMARY: Evaluate asymmetric flapping kinematics & stroke signals
+    const stroke = this.wingAnimation.update(delta, speed, bankVal);
+
+    // 2. PRIMARY: Update GPU vertex deformation uniforms for each wing (Locked Stage 2)
     this.leftForewingDeform.update(stroke.leftForewing, this.elapsedTime);
     this.rightForewingDeform.update(stroke.rightForewing, this.elapsedTime);
     this.leftHindwingDeform.update(stroke.leftHindwing, this.elapsedTime);
     this.rightHindwingDeform.update(stroke.rightHindwing, this.elapsedTime);
 
-    // 3. Update trailing streamers fluid wave dynamics
+    // 3. SECONDARY: Dynamic thorax response, secondary orientation, and articulated 7-segment abdomen inertia
+    this.bodyMotion.update(
+      delta,
+      stroke.bodyBob,
+      stroke.bodyPitch,
+      speed,
+      bankVal,
+      accelForward,
+      accelLateral,
+      angularPitch,
+      angularYaw,
+      stroke.downstrokeImpulse
+    );
+
+    // 4. TERTIARY: Antennae cranial damped inertia responding to flight acceleration, turning, and wing downwash
+    this.antennaSystem.update(
+      delta,
+      stroke.leftForewing.flapVelocity,
+      stroke.downstrokeImpulse,
+      stroke.bodyPitch,
+      bankVal,
+      accelForward,
+      angularYaw
+    );
+
+    // 5. TERTIARY: Trailing streamers fluid wave dynamics, velocity drag, and turning lag
     this.streamerDeform.update(
       this.elapsedTime,
       stroke.leftForewing.flapPhase,
       stroke.leftForewing.flapVelocity,
       speed,
-      bank
+      bankVal,
+      delta,
+      angularYaw,
+      accelForward,
+      stroke.downstrokeImpulse
     );
-
-    // 4. Update secondary antenna inertia
-    this.antennaSystem.update(delta, stroke.leftForewing.flapVelocity, stroke.bodyPitch, bank);
-
-    // 5. Update restrained body counter-motion
-    this.bodyMotion.update(delta, stroke.bodyBob, stroke.bodyPitch, speed, bank);
   }
 
   /**
@@ -240,16 +298,19 @@ export class ProceduralButterfly {
     this.leftHindwingDeform.update(stroke.leftHindwing, time);
     this.rightHindwingDeform.update(stroke.rightHindwing, time);
 
+    this.bodyMotion.update(0.016, stroke.bodyBob, stroke.bodyPitch, speed, bank, 0, 0, 0, 0, stroke.downstrokeImpulse);
+    this.antennaSystem.update(0.016, stroke.leftForewing.flapVelocity, stroke.downstrokeImpulse, stroke.bodyPitch, bank);
     this.streamerDeform.update(
       time,
       stroke.leftForewing.flapPhase,
       stroke.leftForewing.flapVelocity,
       speed,
-      bank
+      bank,
+      0.016,
+      0,
+      0,
+      stroke.downstrokeImpulse
     );
-
-    this.antennaSystem.update(0.016, stroke.leftForewing.flapVelocity, stroke.bodyPitch, bank);
-    this.bodyMotion.update(0.016, stroke.bodyBob, stroke.bodyPitch, speed, bank);
   }
 
   public dispose(): void {

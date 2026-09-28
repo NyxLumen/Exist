@@ -1,5 +1,13 @@
 import * as THREE from "three";
 
+export interface BodyParts {
+  root: THREE.Group;
+  thorax: THREE.Mesh;
+  head: THREE.Group;
+  abdomen: THREE.Group;
+  abdomenSegments: THREE.Group[];
+}
+
 /**
  * BodyGeometry creates high-resolution procedural geometry for the fantasy creature's body:
  * - Refined cranial capsule with twin faceted compound eyes
@@ -8,10 +16,10 @@ import * as THREE from "three";
  */
 export class BodyGeometry {
   /**
-   * Generates the complete body mesh hierarchy as a THREE.Group.
+   * Generates the complete body mesh hierarchy as a typed BodyParts structure.
    * @param material Material to assign to all body components.
    */
-  public static createBody(material: THREE.Material, eyeMaterial?: THREE.Material): THREE.Group {
+  public static createBody(material: THREE.Material, eyeMaterial?: THREE.Material): BodyParts {
     const bodyGroup = new THREE.Group();
     bodyGroup.name = "CreatureBody";
 
@@ -23,11 +31,17 @@ export class BodyGeometry {
     const headGroup = this.createHead(material, eyeMaterial ?? material);
     bodyGroup.add(headGroup);
 
-    // 3. Segmented Abdomen
-    const abdomenGroup = this.createAbdomen(material);
+    // 3. Segmented Articulated Abdomen
+    const { abdomenGroup, segments } = this.createAbdomen(material);
     bodyGroup.add(abdomenGroup);
 
-    return bodyGroup;
+    return {
+      root: bodyGroup,
+      thorax: thoraxMesh,
+      head: headGroup,
+      abdomen: abdomenGroup,
+      abdomenSegments: segments
+    };
   }
 
   /**
@@ -122,23 +136,23 @@ export class BodyGeometry {
   }
 
   /**
-   * 7-segment articulated abdomen with sculpted inter-segmental seams and gentle sagittal curve.
+   * 7-segment articulated abdomen with sculpted inter-segmental seams and progressive spinal flex.
    */
-  private static createAbdomen(material: THREE.Material): THREE.Group {
+  private static createAbdomen(material: THREE.Material): { abdomenGroup: THREE.Group; segments: THREE.Group[] } {
     const abdomenGroup = new THREE.Group();
     abdomenGroup.name = "AbdomenGroup";
     abdomenGroup.position.set(0, -0.16, 0.0);
 
     const segmentCount = 7;
     const totalLength = 0.72;
+    const segLength = totalLength / segmentCount;
+    const segments: THREE.Group[] = [];
+
+    let parentGroup: THREE.Group = abdomenGroup;
 
     for (let s = 0; s < segmentCount; s++) {
       const t0 = s / segmentCount;
       const t1 = (s + 1) / segmentCount;
-
-      const segLength = totalLength / segmentCount;
-      const yStart = -s * segLength;
-      const yEnd = -(s + 1) * segLength;
 
       // Radius profile: slender waist at start, swelling slightly at segment 2, tapering to fine tip
       const r0 = this.getAbdomenRadius(t0);
@@ -148,14 +162,27 @@ export class BodyGeometry {
       // Subtle downward sagittal curve
       const zOffset0 = -Math.pow(t0, 1.4) * 0.08;
       const zOffset1 = -Math.pow(t1, 1.4) * 0.08;
+      const dz = zOffset1 - zOffset0;
 
-      // Construct individual segment geometry
+      // Articulated joint group
+      const jointGroup = new THREE.Group();
+      jointGroup.name = `AbdomenJoint_${s + 1}`;
+      if (s === 0) {
+        jointGroup.position.set(0, 0, zOffset0);
+      } else {
+        jointGroup.position.set(0, -segLength, dz);
+      }
+      parentGroup.add(jointGroup);
+      segments.push(jointGroup);
+      parentGroup = jointGroup;
+
+      // Construct individual segment geometry relative to its joint origin (y from 0 to -segLength)
       const points: THREE.Vector2[] = [
-        new THREE.Vector2(0.001, yStart),
-        new THREE.Vector2(r0 * 0.95, yStart - segLength * 0.08),
-        new THREE.Vector2(rMid, yStart - segLength * 0.5),
-        new THREE.Vector2(r1 * 0.95, yEnd + segLength * 0.08),
-        new THREE.Vector2(0.001, yEnd)
+        new THREE.Vector2(0.001, 0),
+        new THREE.Vector2(r0 * 0.95, -segLength * 0.08),
+        new THREE.Vector2(rMid, -segLength * 0.5),
+        new THREE.Vector2(r1 * 0.95, -segLength + segLength * 0.08),
+        new THREE.Vector2(0.001, -segLength)
       ];
 
       const segGeo = new THREE.LatheGeometry(points, 28);
@@ -163,19 +190,21 @@ export class BodyGeometry {
       const pos = segGeo.attributes.position;
       for (let i = 0; i < pos.count; i++) {
         const y = pos.getY(i);
-        const ratio = THREE.MathUtils.clamp((yStart - y) / segLength, 0.0, 1.0);
+        const ratio = THREE.MathUtils.clamp(-y / segLength, 0.0, 1.0);
         const localZ = pos.getZ(i);
-        const curveZ = THREE.MathUtils.lerp(zOffset0, zOffset1, ratio);
+        const curveZ = THREE.MathUtils.lerp(0, dz, ratio);
         pos.setZ(i, localZ * 0.92 + curveZ);
       }
       segGeo.computeVertexNormals();
 
       const segMesh = new THREE.Mesh(segGeo, material);
       segMesh.name = `AbdomenSegment_${s + 1}`;
-      abdomenGroup.add(segMesh);
+      segMesh.castShadow = true;
+      segMesh.receiveShadow = true;
+      jointGroup.add(segMesh);
     }
 
-    return abdomenGroup;
+    return { abdomenGroup, segments };
   }
 
   /**

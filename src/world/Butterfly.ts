@@ -35,7 +35,11 @@ export class Butterfly {
 
     // Initialize dedicated procedural flight controller operating on ButterflyController
     this.flight = new FlightController(this.controller);
-    this.resize(window.innerWidth, window.innerHeight);
+    if (typeof window !== "undefined") {
+      this.resize(window.innerWidth, window.innerHeight);
+    } else {
+      this.resize(1920, 1080);
+    }
 
     // Instantiate Procedural Butterfly in Stage 1 neutral material
     this.procedural = new ProceduralButterfly({ neutralMaterial: true });
@@ -62,11 +66,11 @@ export class Butterfly {
   }
 
   public update(delta: number): void {
-    // 1. Procedural 3D flight steering
+    // 1. Procedural 3D flight steering (telemetry source)
     this.flight.update(delta);
 
-    // 2. Procedural creature internal update
-    this.procedural.update(delta, this.flight.speed, this.flight.bank);
+    // 2. Procedural creature internal update with rich motion telemetry
+    this.procedural.update(delta, this.flight.motionState);
   }
 
   public dispose(): void {

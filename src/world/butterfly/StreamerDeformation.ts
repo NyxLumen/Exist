@@ -15,7 +15,17 @@ export class StreamerDeformation {
     uFlapVelocity: { value: number };
     uSpeed: { value: number };
     uBank: { value: number };
+    uVelocityDrag: { value: number };
+    uTurningLag: { value: number };
+    uAccelLag: { value: number };
+    uDownwashImpulse: { value: number };
   };
+
+  // Internal damped states for smooth trailing inertia
+  private currentVelocityDrag: number = 0;
+  private currentTurningLag: number = 0;
+  private currentAccelLag: number = 0;
+  private currentDownwashImpulse: number = 0;
 
   constructor() {
     this.uniforms = {
@@ -23,7 +33,11 @@ export class StreamerDeformation {
       uFlapPhase: { value: 0 },
       uFlapVelocity: { value: 0 },
       uSpeed: { value: 0 },
-      uBank: { value: 0 }
+      uBank: { value: 0 },
+      uVelocityDrag: { value: 0 },
+      uTurningLag: { value: 0 },
+      uAccelLag: { value: 0 },
+      uDownwashImpulse: { value: 0 }
     };
 
     this.material = new THREE.MeshStandardMaterial({
@@ -41,6 +55,10 @@ export class StreamerDeformation {
       shader.uniforms.uFlapVelocity = this.uniforms.uFlapVelocity;
       shader.uniforms.uSpeed = this.uniforms.uSpeed;
       shader.uniforms.uBank = this.uniforms.uBank;
+      shader.uniforms.uVelocityDrag = this.uniforms.uVelocityDrag;
+      shader.uniforms.uTurningLag = this.uniforms.uTurningLag;
+      shader.uniforms.uAccelLag = this.uniforms.uAccelLag;
+      shader.uniforms.uDownwashImpulse = this.uniforms.uDownwashImpulse;
 
       shader.vertexShader = `
         uniform float uTime;
@@ -48,6 +66,10 @@ export class StreamerDeformation {
         uniform float uFlapVelocity;
         uniform float uSpeed;
         uniform float uBank;
+        uniform float uVelocityDrag;
+        uniform float uTurningLag;
+        uniform float uAccelLag;
+        uniform float uDownwashImpulse;
 
         attribute float aDistanceToRoot;
         attribute float aDistanceToEdge;
@@ -73,21 +95,33 @@ export class StreamerDeformation {
         // Progressive amplitude envelope: root is anchored (0), tip moves freely (pow(s, 1.35))
         float amp = pow(s, 1.35);
 
-        // 1. Primary low-frequency traveling wave (silk in fluid)
-        float wave1 = sin(uTime * 2.2 - s * 3.8) * 0.14 * amp;
-        float wave2 = cos(uTime * 3.1 - s * 5.2 + 0.9) * 0.08 * amp;
+        // Bilateral desynchronization using sign of initial position.x
+        float streamerSign = sign(position.x);
+        float phaseShift = streamerSign * 0.42;
+
+        // 1. Primary low-frequency traveling wave (silk in fluid, desynchronized)
+        float wave1 = sin(uTime * 2.2 - s * 3.8 + phaseShift) * 0.13 * amp;
+        float wave2 = cos(uTime * 3.1 - s * 5.2 + 0.9 - phaseShift) * 0.07 * amp;
         float lateralWave = wave1 + wave2;
 
-        // 2. Trailing depth wave in Z (flapping air wake impulse)
-        float wakeWave = sin(uFlapPhase * 6.2831853 - s * 4.2) * 0.12 * amp;
-        float sagWave = cos(uTime * 1.8 - s * 2.8) * 0.06 * amp;
-        float depthWave = wakeWave + sagWave;
+        // 2. Trailing depth wave in Z (flapping air wake impulse + downwash pulse)
+        float wakeWave = sin(uFlapPhase * 6.2831853 - s * 4.2 + phaseShift * 0.5) * 0.10 * amp;
+        float sagWave = cos(uTime * 1.8 - s * 2.8) * 0.05 * amp;
+        float downwashPulse = uDownwashImpulse * sin(uFlapPhase * 6.2831853 - s * 3.6) * 0.08 * amp;
+        float depthWave = wakeWave + sagWave + downwashPulse;
 
-        // 3. Bank and flight drag bias
-        float bankDrag = uBank * 0.25 * amp;
+        // 3. Dynamic Turning Lag (delayed lateral trailing opposing turning rate)
+        float turnLagX = -uTurningLag * 0.28 * amp;
 
-        transformed.x += lateralWave + bankDrag;
-        transformed.z += depthWave - uSpeed * 0.35 * s;
+        // 4. Longitudinal acceleration drag (inertia trails during acceleration)
+        float accelDragY = -uAccelLag * 0.15 * amp;
+
+        // 5. Velocity trailing drag in Z
+        float speedDragZ = -uVelocityDrag * 0.42 * pow(s, 1.25);
+
+        transformed.x += lateralWave + uBank * 0.20 * amp + turnLagX;
+        transformed.y += accelDragY;
+        transformed.z += depthWave + speedDragZ;
         `
       );
 
@@ -153,15 +187,39 @@ export class StreamerDeformation {
       );
     };
 
-    this.material.customProgramCacheKey = () => "StreamerShader_v3";
+    this.material.customProgramCacheKey = () => "StreamerShader_v4";
   }
 
-  public update(time: number, flapPhase: number, flapVelocity: number, speed: number, bank: number): void {
+  public update(
+    time: number,
+    flapPhase: number,
+    flapVelocity: number,
+    speed: number,
+    bank: number,
+    delta: number = 0.016,
+    angularYaw: number = 0,
+    accelForward: number = 0,
+    downstrokeImpulse: number = 0
+  ): void {
     this.uniforms.uTime.value = time;
     this.uniforms.uFlapPhase.value = flapPhase;
     this.uniforms.uFlapVelocity.value = flapVelocity;
     this.uniforms.uSpeed.value = speed;
     this.uniforms.uBank.value = bank;
+
+    // Critically damped inertial settling for secondary fluid trailing
+    const decay = 1 - Math.exp(-4.5 * delta);
+    const pulseDecay = 1 - Math.exp(-8.0 * delta);
+
+    this.currentVelocityDrag += (speed - this.currentVelocityDrag) * decay;
+    this.currentTurningLag += (angularYaw * 0.16 + bank * 0.22 - this.currentTurningLag) * decay;
+    this.currentAccelLag += (accelForward * 0.08 - this.currentAccelLag) * decay;
+    this.currentDownwashImpulse += (downstrokeImpulse * 0.035 - this.currentDownwashImpulse) * pulseDecay;
+
+    this.uniforms.uVelocityDrag.value = this.currentVelocityDrag;
+    this.uniforms.uTurningLag.value = this.currentTurningLag;
+    this.uniforms.uAccelLag.value = this.currentAccelLag;
+    this.uniforms.uDownwashImpulse.value = this.currentDownwashImpulse;
   }
 
   public dispose(): void {
