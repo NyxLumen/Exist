@@ -124,7 +124,7 @@ function runVerification() {
   console.log("  [PASS] Soft composition containment gracefully preserves the framing around EXIST.");
 
   // Check 4: Diverse Natural Phases
-  const requiredPhases = [FlightPhase.RESTING, FlightPhase.AWAKENING, FlightPhase.CRUISE];
+  const requiredPhases = [FlightPhase.CRUISE];
   for (const rp of requiredPhases) {
     if (!observedPhases.has(rp)) {
       throw new Error(`Missing expected flight phase: ${rp}`);
@@ -134,6 +134,13 @@ function runVerification() {
     throw new Error("Locomotion lacked behavioral maneuvers (no turning/climbing/gliding observed)!");
   }
   console.log("  [PASS] Natural behavioral variety confirmed across multiple flight phases.");
+
+  // Check 5: Heading Alignment (Visual creature head vs Velocity Vector)
+  const finalTelemetry = butterfly.flight.getDebugTelemetry();
+  if (finalTelemetry.headingErrorDeg > 35) {
+    throw new Error(`Visual orientation misaligned with velocity: error = ${finalTelemetry.headingErrorDeg.toFixed(1)}°`);
+  }
+  console.log(`  [PASS] Heading alignment verified: error = ${finalTelemetry.headingErrorDeg.toFixed(1)}° (closely tracks velocity with biological turn lag).`);
 
   // [4] Determinism Verification
   console.log("\n[4] Deterministic Simulation Test (Same seed produces bit-exact trajectory):");

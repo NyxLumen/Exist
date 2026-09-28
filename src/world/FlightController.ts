@@ -71,28 +71,36 @@ export interface FlightConfig {
  * - Authoritative orientation with rotational inertia and lateral-acceleration banking.
  * - Strictly zero per-frame heap allocations.
  */
+/**
+ * Authoritative Canonical Forward and Reference Axes for the Procedural Butterfly creature:
+ * - BUTTERFLY_CANONICAL_FORWARD = (0, 1, 0) [+Y]: Head, cranial capsule, antennae, leading edges.
+ * - BUTTERFLY_CANONICAL_UP      = (0, 0, 1) [+Z]: Dorsal thoracic crest, upper wing camber (camera facing).
+ * - BUTTERFLY_CANONICAL_RIGHT   = (1, 0, 0) [+X]: Right forewing and hindwing span.
+ */
+export const BUTTERFLY_CANONICAL_FORWARD = new THREE.Vector3(0, 1, 0);
+export const BUTTERFLY_CANONICAL_UP = new THREE.Vector3(0, 0, 1);
+export const BUTTERFLY_CANONICAL_RIGHT = new THREE.Vector3(1, 0, 0);
+
 export class FlightController {
   private readonly root: THREE.Group;
 
   // Time & Lifecycle
   private flightTime: number = 0;
-  private readonly idleDuration: number = 1.8;
-  private readonly liftoffDuration: number = 2.5;
 
   // Authoritative Flight Kinematics
   public readonly position: THREE.Vector3 = new THREE.Vector3();
   public readonly velocity: THREE.Vector3 = new THREE.Vector3();
   public readonly acceleration: THREE.Vector3 = new THREE.Vector3();
   public readonly angularVelocity: THREE.Vector3 = new THREE.Vector3();
-  public readonly direction: THREE.Vector3 = new THREE.Vector3(0, 0, 1);
-  public readonly desiredDirection: THREE.Vector3 = new THREE.Vector3(0, 0, 1);
+  public readonly direction: THREE.Vector3 = new THREE.Vector3(-0.55, 0.75, 0.35).normalize();
+  public readonly desiredDirection: THREE.Vector3 = new THREE.Vector3(-0.55, 0.75, 0.35).normalize();
   public readonly steeringForce: THREE.Vector3 = new THREE.Vector3();
   public readonly containmentForce: THREE.Vector3 = new THREE.Vector3();
 
-  public speed: number = 0;
+  public speed: number = 0.22;
   public bank: number = 0;
   public energy: number = 1.0;
-  public flightPhase: FlightPhase = FlightPhase.RESTING;
+  public flightPhase: FlightPhase = FlightPhase.CRUISE;
   public isGliding: boolean = false;
   public enabled: boolean = true;
 
@@ -107,14 +115,13 @@ export class FlightController {
   private safeSpan = { x: 1.45, y: 0.80, z: 0.60 };
   private margin = { x: 0.50, y: 0.40, z: 0.30 };
 
-  // Initial resting pose near "ST"
+  // Initial active flight pose near "ST"
   private readonly initialPosition = new THREE.Vector3(0.68, -0.94, 0.1);
-  private readonly initialRotation = new THREE.Euler(0.46, -0.14, 0.04);
-  private readonly initialQuat = new THREE.Quaternion().setFromEuler(this.initialRotation);
+  private readonly initialQuat = new THREE.Quaternion();
 
   // Behavioral Wandering Intent State (Correlated Stochastic Drift)
   private intentPlaneAngle: number = 2.35; // Heading in visual plane (rad)
-  private intentDepthAngle: number = 0.05; // Elevation in depth Z (rad)
+  private intentDepthAngle: number = 0.15; // Elevation in depth Z (rad)
   private intentPlaneRate: number = 0.0;
   private intentDepthRate: number = 0.0;
   private targetSpeed: number = 0.38;
@@ -132,10 +139,12 @@ export class FlightController {
   private readonly _liftForce = new THREE.Vector3();
   private readonly _dragForce = new THREE.Vector3();
   private readonly _netAccel = new THREE.Vector3();
-  private readonly _actualForward = new THREE.Vector3(0, 0, 1);
-  private readonly _forwardAxis = new THREE.Vector3(0, 0, 1);
-  private readonly _worldUp = new THREE.Vector3(0, 1, 0);
-  private readonly _rightAxis = new THREE.Vector3(1, 0, 0);
+  private readonly _actualForward = new THREE.Vector3(0, 1, 0);
+  private readonly _worldUp = BUTTERFLY_CANONICAL_UP.clone();
+  private readonly _fallbackUp = new THREE.Vector3(0, 1, 0);
+  private readonly _orthoUp = new THREE.Vector3(0, 0, 1);
+  private readonly _orthoRight = new THREE.Vector3(1, 0, 0);
+  private readonly _basisMatrix = new THREE.Matrix4();
   private readonly _targetQuat = new THREE.Quaternion();
   private readonly _bankQuat = new THREE.Quaternion();
   private readonly _prevQuat = new THREE.Quaternion();
@@ -149,15 +158,15 @@ export class FlightController {
       minSpeed: config.minSpeed ?? 0.12,
       maxSpeed: config.maxSpeed ?? 0.65,
       cruiseSpeed: config.cruiseSpeed ?? 0.38,
-      propulsionStrength: config.propulsionStrength ?? 1.25,
-      steeringResponse: config.steeringResponse ?? 2.2,
+      propulsionStrength: config.propulsionStrength ?? 0.95,
+      steeringResponse: config.steeringResponse ?? 2.4,
       maxSteeringForce: config.maxSteeringForce ?? 1.15,
-      dragCoefficient: config.dragCoefficient ?? 0.72,
+      dragCoefficient: config.dragCoefficient ?? 0.82,
       liftRatio: config.liftRatio ?? 0.85,
-      bankStrength: config.bankStrength ?? 0.24,
-      maxBankAngle: config.maxBankAngle ?? 0.16,
-      bankDamping: config.bankDamping ?? 2.8,
-      rotationInertiaDamping: config.rotationInertiaDamping ?? 2.4,
+      bankStrength: config.bankStrength ?? 0.26,
+      maxBankAngle: config.maxBankAngle ?? 0.22,
+      bankDamping: config.bankDamping ?? 3.5,
+      rotationInertiaDamping: config.rotationInertiaDamping ?? 6.2,
       wanderRate: config.wanderRate ?? 0.45,
       wanderPersistence: config.wanderPersistence ?? 1.2,
       energyBurnRate: config.energyBurnRate ?? 0.035,
@@ -176,10 +185,10 @@ export class FlightController {
       acceleration: this.acceleration,
       angularVelocity: this.angularVelocity,
       direction: this.direction,
-      speed: 0,
+      speed: 0.24,
       bank: 0,
       flightTime: 0,
-      flightPhase: FlightPhase.RESTING,
+      flightPhase: FlightPhase.CRUISE,
       energy: 1.0,
       isGliding: false,
       desiredDirection: this.desiredDirection,
@@ -204,29 +213,37 @@ export class FlightController {
 
   public resetToInitialPose(): void {
     this.position.copy(this.initialPosition);
-    this.velocity.set(0, 0, 0);
-    this.acceleration.set(0, 0, 0);
-    this.angularVelocity.set(0, 0, 0);
-    this.direction.set(0, 0, 1);
-    this.desiredDirection.set(-0.7, 0.7, 0.1).normalize();
+    this.direction.set(-0.55, 0.75, 0.35).normalize();
+    this.desiredDirection.copy(this.direction);
     this.steeringForce.set(0, 0, 0);
     this.containmentForce.set(0, 0, 0);
 
-    this.speed = 0;
+    // Immediate active flight: creature is alive and moving smoothly from frame 0
+    this.speed = 0.24;
+    this.velocity.copy(this.direction).multiplyScalar(this.speed);
+    this.acceleration.set(0, 0, 0);
+    this.angularVelocity.set(0, 0, 0);
     this.bank = 0;
-    this.energy = 1.0;
     this.flightTime = 0;
-    this.flightPhase = FlightPhase.RESTING;
+    this.flightPhase = FlightPhase.CRUISE;
+    this.energy = 1.0;
     this.isGliding = false;
     this.glideTimer = 0;
     this.timeSinceLastGlide = 0;
 
-    this.intentPlaneAngle = 2.35; // Facing up and left towards center
-    this.intentDepthAngle = 0.05;
+    this.intentPlaneAngle = Math.atan2(this.direction.y, this.direction.x);
+    this.intentDepthAngle = Math.asin(this.direction.z);
     this.intentPlaneRate = 0.0;
     this.intentDepthRate = 0.0;
     this.targetSpeed = this.config.cruiseSpeed;
     this.rngState = 0x89abcdef;
+
+    // Immediately compute coherent initial orientation from velocity
+    this._actualForward.copy(this.direction);
+    this._orthoUp.copy(this._worldUp).addScaledVector(this._actualForward, -this._worldUp.dot(this._actualForward)).normalize();
+    this._orthoRight.crossVectors(this._actualForward, this._orthoUp).normalize();
+    this._basisMatrix.makeBasis(this._orthoRight, this._actualForward, this._orthoUp);
+    this.initialQuat.setFromRotationMatrix(this._basisMatrix);
 
     this.root.position.copy(this.position);
     this.root.quaternion.copy(this.initialQuat);
@@ -236,7 +253,7 @@ export class FlightController {
 
   public setInitialPosition(x: number, y: number, z: number): void {
     this.initialPosition.set(x, y, z);
-    if (this.flightTime < this.idleDuration) {
+    if (this.flightTime < 0.1) {
       this.position.copy(this.initialPosition);
       this.root.position.copy(this.position);
       this.syncMotionState();
@@ -281,47 +298,16 @@ export class FlightController {
     if (!this.enabled) return;
     this.flightTime += delta;
 
-    // 1. Initial Resting Phase (~1.8s)
-    if (this.flightTime < this.idleDuration) {
-      const hoverY = Math.sin(this.flightTime * 2.1) * 0.005;
-      const hoverX = Math.cos(this.flightTime * 1.4) * 0.003;
-      this.root.position.set(
-        this.position.x + hoverX,
-        this.position.y + hoverY,
-        this.position.z
-      );
-      this.root.quaternion.copy(this.initialQuat);
-      this._prevQuat.copy(this.initialQuat);
+    // 1. Update Correlated Stochastic Directional Intent
+    this.updateDirectionalIntent(delta);
 
-      this.velocity.set(0, 0, 0);
-      this.acceleration.set(0, 0, 0);
-      this.angularVelocity.set(0, 0, 0);
-      this.direction.set(0, 0, 1);
-      this.speed = 0;
-      this.bank = 0;
-      this.energy = 1.0;
-      this.flightPhase = FlightPhase.RESTING;
-      this.isGliding = false;
+    // 2. Update Energy and Glide State Dynamics
+    this.updateEnergyAndGlide(delta);
 
-      this.syncMotionState();
-      return;
-    }
+    // 3. Compute Flight Forces & Net Acceleration
+    this.computeFlightForces(delta, wingFeedback);
 
-    // 2. Smooth Liftoff Awakening Ramp (0 to 1 over ~2.5s)
-    const timeSinceAwake = this.flightTime - this.idleDuration;
-    const rawRamp = Math.min(timeSinceAwake / this.liftoffDuration, 1.0);
-    const liftoffRamp = rawRamp * rawRamp * (3.0 - 2.0 * rawRamp); // Smoothstep
-
-    // 3. Update Correlated Stochastic Directional Intent
-    this.updateDirectionalIntent(delta, liftoffRamp);
-
-    // 4. Update Energy and Glide State Dynamics
-    this.updateEnergyAndGlide(delta, liftoffRamp);
-
-    // 5. Compute Flight Forces & Net Acceleration
-    this.computeFlightForces(delta, liftoffRamp, wingFeedback);
-
-    // 6. Integrate Velocity & Position (Physical Momentum)
+    // 4. Integrate Velocity & Position (Physical Momentum)
     this.velocity.addScaledVector(this._netAccel, delta);
     this.speed = this.velocity.length();
 
@@ -340,13 +326,13 @@ export class FlightController {
     this.position.addScaledVector(this.velocity, delta);
     this.root.position.copy(this.position);
 
-    // 7. Authoritative Orientation Derived from Velocity with Rotational Inertia & Banking
-    this.updateAuthoritativeOrientation(delta, liftoffRamp);
+    // 5. Authoritative Orientation Derived from Velocity with Rotational Inertia & Banking
+    this.updateAuthoritativeOrientation(delta);
 
-    // 8. Classify Current Flight Phase
-    this.classifyFlightPhase(liftoffRamp);
+    // 6. Classify Current Flight Phase
+    this.classifyFlightPhase();
 
-    // 9. Synchronize Telemetry State
+    // 7. Synchronize Telemetry State
     this.syncMotionState();
   }
 
@@ -354,13 +340,7 @@ export class FlightController {
    * Correlated stochastic drift:
    * Heading intention evolves continuously with persistence rather than picking random targets.
    */
-  private updateDirectionalIntent(delta: number, liftoffRamp: number): void {
-    if (liftoffRamp < 0.05) {
-      // Initial intent points upward and leftward into the EXIST composition
-      this.desiredDirection.set(-0.65, 0.70, 0.28).normalize();
-      return;
-    }
-
+  private updateDirectionalIntent(delta: number): void {
     // Ornstein-Uhlenbeck continuous angular drift with mean reversion
     const lambda = this.config.wanderPersistence;
     const noisePlane = this.nextRandom() * this.config.wanderRate;
@@ -413,13 +393,7 @@ export class FlightController {
   /**
    * Biological energy dynamics and opportunistic glide phase management.
    */
-  private updateEnergyAndGlide(delta: number, liftoffRamp: number): void {
-    if (liftoffRamp < 0.2) {
-      this.energy = 1.0;
-      this.isGliding = false;
-      return;
-    }
-
+  private updateEnergyAndGlide(delta: number): void {
     this.timeSinceLastGlide += delta;
 
     // Glide state timer update
@@ -460,13 +434,16 @@ export class FlightController {
    * Computes all flight forces:
    * Propulsion + Steering + Lift + Containment + Quadratic Fluid Drag.
    */
-  private computeFlightForces(_delta: number, liftoffRamp: number, wingFeedback?: WingbeatFeedback): void {
+  private computeFlightForces(_delta: number, wingFeedback?: WingbeatFeedback): void {
     const downstrokeImpulse = wingFeedback ? wingFeedback.downstrokeImpulse : 0;
 
-    // 1. Propulsion Force (forward along current orientation)
-    let propMag = this.config.propulsionStrength * liftoffRamp;
+    // 1. Propulsion Force (forward along current movement direction)
+    // Dynamic throttling maintains biological cruise rhythm without pegging to maxSpeed
+    const speedRatio = this.speed / Math.max(0.1, this.targetSpeed);
+    const throttle = THREE.MathUtils.clamp(1.35 - 0.65 * speedRatio, 0.25, 1.4);
+    let propMag = this.config.propulsionStrength * throttle;
     if (this.isGliding) {
-      propMag *= 0.10; // Glide has minimal active thrust
+      propMag *= 0.08; // Glide has minimal active thrust
     } else {
       // Downstroke coupling: wing push produces subtle forward thrust modulation
       propMag *= (1.0 + 0.18 * downstrokeImpulse);
@@ -475,7 +452,7 @@ export class FlightController {
     this._propulsionForce.copy(this.direction).multiplyScalar(propMag);
 
     // 2. Steering Force (Reynolds autonomous vehicle steering towards desired velocity)
-    this._desiredVel.copy(this.desiredDirection).multiplyScalar(this.targetSpeed * liftoffRamp);
+    this._desiredVel.copy(this.desiredDirection).multiplyScalar(this.targetSpeed);
     this.steeringForce.subVectors(this._desiredVel, this.velocity).multiplyScalar(this.config.steeringResponse);
     this.steeringForce.clampLength(0, this.config.maxSteeringForce);
 
@@ -543,24 +520,35 @@ export class FlightController {
 
   /**
    * Authoritative orientation derived from actual velocity with rotational inertia and lateral banking.
+   * Uses an orthonormal Gram-Schmidt reference frame aligned with canonical model axes:
+   * - Column 0 (X): Right
+   * - Column 1 (Y): Forward (head)
+   * - Column 2 (Z): Up (dorsal carapace)
+   * Strictly zero heap allocations.
    */
-  private updateAuthoritativeOrientation(delta: number, liftoffRamp: number): void {
+  private updateAuthoritativeOrientation(delta: number): void {
     this._prevQuat.copy(this.root.quaternion);
 
-    if (this.speed > 0.02) {
+    if (this.speed > 0.01) {
       this._actualForward.copy(this.velocity).normalize();
 
-      // Heading rotation aligning model local +Z with actual forward velocity
-      this._targetQuat.setFromUnitVectors(this._forwardAxis, this._actualForward);
-
-      // Compute local lateral right axis = actualForward x worldUp
-      this._rightAxis.crossVectors(this._actualForward, this._worldUp).normalize();
-      let lateralAccel = 0;
-      if (this._rightAxis.lengthSq() > 0.001) {
-        lateralAccel = this.acceleration.dot(this._rightAxis);
+      // Gram-Schmidt orthonormalization: project reference up perpendicular to flight direction
+      this._orthoUp.copy(this._worldUp).addScaledVector(this._actualForward, -this._worldUp.dot(this._actualForward));
+      if (this._orthoUp.lengthSq() < 0.0001) {
+        // Fallback when flying straight along camera depth axis
+        this._orthoUp.copy(this._fallbackUp).addScaledVector(this._actualForward, -this._fallbackUp.dot(this._actualForward));
       }
+      this._orthoUp.normalize();
+
+      // Right = Forward x Up
+      this._orthoRight.crossVectors(this._actualForward, this._orthoUp).normalize();
 
       // Dynamic banking proportional to lateral turning acceleration
+      let lateralAccel = 0;
+      if (this.acceleration.lengthSq() > 0.0001) {
+        lateralAccel = this.acceleration.dot(this._orthoRight);
+      }
+
       const targetBank = -THREE.MathUtils.clamp(
         lateralAccel * this.config.bankStrength,
         -this.config.maxBankAngle,
@@ -568,17 +556,22 @@ export class FlightController {
       );
       this.bank += (targetBank - this.bank) * (1 - Math.exp(-this.config.bankDamping * delta));
 
-      // Apply roll along flight axis
-      this._bankQuat.setFromAxisAngle(this._forwardAxis, this.bank);
-      this._targetQuat.multiply(this._bankQuat);
+      // Apply banking roll around flight axis (actualForward)
+      if (Math.abs(this.bank) > 0.001) {
+        this._bankQuat.setFromAxisAngle(this._actualForward, this.bank);
+        this._orthoRight.applyQuaternion(this._bankQuat);
+        this._orthoUp.applyQuaternion(this._bankQuat);
+      }
+
+      // Build target matrix: column 0 = Right (X), column 1 = Forward (Y, head), column 2 = Up (Z, dorsal)
+      this._basisMatrix.makeBasis(this._orthoRight, this._actualForward, this._orthoUp);
+      this._targetQuat.setFromRotationMatrix(this._basisMatrix);
 
       // Rotational inertia: critically damped slerp so the creature carves naturally through turns
       this.root.quaternion.slerp(
         this._targetQuat,
         1 - Math.exp(-this.config.rotationInertiaDamping * delta)
       );
-    } else if (liftoffRamp < 0.1) {
-      this.root.quaternion.copy(this.initialQuat);
     }
 
     // Compute angular velocity from quaternion delta
@@ -598,18 +591,14 @@ export class FlightController {
   /**
    * Classifies current flight phase organically from flight state conditions.
    */
-  private classifyFlightPhase(liftoffRamp: number): void {
-    if (this.flightTime < this.idleDuration) {
-      this.flightPhase = FlightPhase.RESTING;
-    } else if (liftoffRamp < 0.95) {
-      this.flightPhase = FlightPhase.AWAKENING;
-    } else if (this.isGliding) {
+  private classifyFlightPhase(): void {
+    if (this.isGliding) {
       this.flightPhase = FlightPhase.GLIDING;
     } else if (this.energy < 0.22) {
       this.flightPhase = FlightPhase.RECOVERING;
     } else if (Math.abs(this.bank) > 0.10 && this.angularVelocity.length() > 0.55) {
       this.flightPhase = FlightPhase.TURNING;
-    } else if (this.acceleration.dot(this.direction) > 0.35) {
+    } else if (this.acceleration.dot(this.direction) > 0.25) {
       this.flightPhase = FlightPhase.ACCELERATING;
     } else if (this.velocity.y > 0.18) {
       this.flightPhase = FlightPhase.CLIMBING;
@@ -636,6 +625,10 @@ export class FlightController {
    * Telemetry snapshot for debug inspection and UI overlay.
    */
   public getDebugTelemetry() {
+    this._actualForward.copy(BUTTERFLY_CANONICAL_FORWARD).applyQuaternion(this.root.quaternion);
+    const headDotVel = this.speed > 0.001 ? this._actualForward.dot(this.direction) : 1;
+    const headingErrorDeg = (Math.acos(Math.max(-1, Math.min(1, headDotVel))) * 180) / Math.PI;
+
     return {
       phase: this.flightPhase,
       speed: this.speed,
@@ -648,6 +641,10 @@ export class FlightController {
       velX: this.velocity.x,
       velY: this.velocity.y,
       velZ: this.velocity.z,
+      headX: this._actualForward.x,
+      headY: this._actualForward.y,
+      headZ: this._actualForward.z,
+      headingErrorDeg,
       accelMag: this.acceleration.length(),
       steerMag: this.steeringForce.length(),
       containMag: this.containmentForce.length()
