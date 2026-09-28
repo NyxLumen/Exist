@@ -27,9 +27,11 @@ export class StreamerDeformation {
     };
 
     this.material = new THREE.MeshStandardMaterial({
-      color: 0x95a2b0,
-      roughness: 0.45,
-      metalness: 0.08,
+      color: 0x050814,
+      roughness: 0.28,
+      metalness: 0.2,
+      transparent: true,
+      depthWrite: true,
       side: THREE.DoubleSide
     });
 
@@ -51,6 +53,9 @@ export class StreamerDeformation {
         attribute float aDistanceToEdge;
         attribute float aWingPart;
 
+        varying float vDistanceToRoot;
+        varying float vDistanceToEdge;
+
         ${shader.vertexShader}
       `;
 
@@ -58,6 +63,9 @@ export class StreamerDeformation {
         "#include <begin_vertex>",
         `
         #include <begin_vertex>
+
+        vDistanceToRoot = aDistanceToRoot;
+        vDistanceToEdge = aDistanceToEdge;
 
         // s = distance along streamer length (0 at anchor, 1 at tip)
         float s = aDistanceToRoot;
@@ -99,9 +107,53 @@ export class StreamerDeformation {
         objectNormal.z = nZ;
         `
       );
+
+      // Stage 3 Fragment Shader: Bioluminescent silk ribbon
+      shader.fragmentShader = `
+        uniform float uTime;
+        varying float vDistanceToRoot;
+        varying float vDistanceToEdge;
+        ${shader.fragmentShader}
+      `;
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        `
+        #include <color_fragment>
+        float s = vDistanceToRoot;
+        float edge = vDistanceToEdge;
+
+        // Gradient from deep violet at anchor to electric cyan at tip
+        vec3 ribbonColor = mix(vec3(0.04, 0.015, 0.10), vec3(0.0, 0.35, 0.75), s);
+        diffuseColor.rgb = ribbonColor;
+        diffuseColor.a = mix(0.48, 0.85, pow(edge, 1.5));
+        `
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <emissivemap_fragment>",
+        `
+        #include <emissivemap_fragment>
+
+        // Crisp edge glow
+        float edgeGlow = pow(smoothstep(0.70, 0.99, edge), 2.0);
+        vec3 edgeEmissive = edgeGlow * mix(vec3(0.45, 0.15, 0.95), vec3(0.0, 0.92, 1.0), s) * 2.6;
+
+        // Fluid traveling wave of light
+        float pulse = sin(uTime * 2.4 - s * 5.0) * 0.5 + 0.5;
+        float waveLight = pow(pulse, 3.0) * pow(s, 1.2) * 1.8;
+        vec3 pulseEmissive = waveLight * vec3(0.15, 0.85, 1.0);
+
+        // Apical tip glow
+        float tipGlow = smoothstep(0.85, 1.0, s) * 2.2;
+        vec3 tipEmissive = tipGlow * vec3(0.2, 0.95, 1.0);
+
+        totalEmissiveRadiance += edgeEmissive + pulseEmissive + tipEmissive;
+        `
+      );
     };
 
-    this.material.customProgramCacheKey = () => "StreamerDeformation_Neutral";
+    this.material.customProgramCacheKey = () => "StreamerShader_v3";
   }
 
   public update(time: number, flapPhase: number, flapVelocity: number, speed: number, bank: number): void {

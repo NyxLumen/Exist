@@ -11,7 +11,7 @@ export class AntennaSystem {
   public readonly leftAntennaGroup: THREE.Group;
   public readonly rightAntennaGroup: THREE.Group;
 
-  constructor(material: THREE.Material) {
+  constructor(material: THREE.Material, beadMaterial?: THREE.Material) {
     this.group = new THREE.Group();
     this.group.name = "AntennaSystem";
 
@@ -23,8 +23,8 @@ export class AntennaSystem {
     this.rightAntennaGroup.name = "RightAntennaGroup";
     this.rightAntennaGroup.position.set(0.038, 0.28, 0.05);
 
-    const leftMesh = this.buildAntennaMesh(false, material);
-    const rightMesh = this.buildAntennaMesh(true, material);
+    const leftMesh = this.buildAntennaMesh(false, material, beadMaterial ?? material);
+    const rightMesh = this.buildAntennaMesh(true, material, beadMaterial ?? material);
 
     this.leftAntennaGroup.add(leftMesh);
     this.rightAntennaGroup.add(rightMesh);
@@ -66,7 +66,11 @@ export class AntennaSystem {
   /**
    * Generates a tapered curved tube for one antenna.
    */
-  private buildAntennaMesh(isRight: boolean, material: THREE.Material): THREE.Group {
+  private buildAntennaMesh(
+    isRight: boolean,
+    material: THREE.Material,
+    beadMaterial: THREE.Material
+  ): THREE.Group {
     const sign = isRight ? 1 : -1;
     const antennaGroup = new THREE.Group();
 
@@ -163,7 +167,7 @@ export class AntennaSystem {
     const tipPoint = curve.getPointAt(1.0);
     const beadGeo = new THREE.SphereGeometry(0.0125, 16, 12);
     beadGeo.scale(0.8, 1.4, 0.8);
-    const beadMesh = new THREE.Mesh(beadGeo, material);
+    const beadMesh = new THREE.Mesh(beadGeo, beadMaterial);
     beadMesh.name = isRight ? "RightAntennaBead" : "LeftAntennaBead";
     beadMesh.position.copy(tipPoint);
     beadMesh.position.addScaledVector(frames.tangents[tubularSegments], 0.006);

@@ -11,7 +11,7 @@ export class BodyGeometry {
    * Generates the complete body mesh hierarchy as a THREE.Group.
    * @param material Material to assign to all body components.
    */
-  public static createBody(material: THREE.Material): THREE.Group {
+  public static createBody(material: THREE.Material, eyeMaterial?: THREE.Material): THREE.Group {
     const bodyGroup = new THREE.Group();
     bodyGroup.name = "CreatureBody";
 
@@ -20,7 +20,7 @@ export class BodyGeometry {
     bodyGroup.add(thoraxMesh);
 
     // 2. Head & Compound Eyes
-    const headGroup = this.createHead(material);
+    const headGroup = this.createHead(material, eyeMaterial ?? material);
     bodyGroup.add(headGroup);
 
     // 3. Segmented Abdomen
@@ -77,7 +77,7 @@ export class BodyGeometry {
   /**
    * Head assembly featuring smooth rounded cranial dome and twin lateral compound eyes.
    */
-  private static createHead(material: THREE.Material): THREE.Group {
+  private static createHead(material: THREE.Material, eyeMaterial: THREE.Material): THREE.Group {
     const headGroup = new THREE.Group();
     headGroup.name = "HeadGroup";
     headGroup.position.set(0, 0.22, 0.03);
@@ -93,13 +93,13 @@ export class BodyGeometry {
     const eyeGeo = new THREE.SphereGeometry(0.032, 24, 20);
     eyeGeo.scale(0.8, 1.3, 1.1);
 
-    const leftEye = new THREE.Mesh(eyeGeo, material);
+    const leftEye = new THREE.Mesh(eyeGeo, eyeMaterial);
     leftEye.name = "LeftEye";
     leftEye.position.set(-0.048, 0.02, 0.015);
     leftEye.rotation.set(-0.2, -0.4, 0.3);
     headGroup.add(leftEye);
 
-    const rightEye = new THREE.Mesh(eyeGeo.clone(), material);
+    const rightEye = new THREE.Mesh(eyeGeo.clone(), eyeMaterial);
     rightEye.name = "RightEye";
     rightEye.position.set(0.048, 0.02, 0.015);
     rightEye.rotation.set(-0.2, 0.4, -0.3);

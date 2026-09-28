@@ -64,22 +64,42 @@ export class ProceduralButterfly {
     // 1. Initialize Kinematics & Secondary Motion Subsystems
     this.wingAnimation = new WingAnimation();
 
-    // 2. Base neutral body material (studio clay)
-    const neutralBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x95a2b0,
-      roughness: 0.45,
-      metalness: 0.08,
+    // 2. Stage 3: Bioluminescent body materials (iridescent chitin, luminous eye facets, glowing antenna beads)
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0x070815,
+      roughness: 0.28,
+      metalness: 0.38,
+      emissive: 0x020718,
+      emissiveIntensity: 0.85,
       side: THREE.DoubleSide
     });
-    this.materials.push(neutralBodyMat);
+    this.materials.push(bodyMat);
+
+    const eyeMat = new THREE.MeshStandardMaterial({
+      color: 0x021626,
+      roughness: 0.12,
+      metalness: 0.45,
+      emissive: 0x00d4ff,
+      emissiveIntensity: 1.6
+    });
+    this.materials.push(eyeMat);
+
+    const beadMat = new THREE.MeshStandardMaterial({
+      color: 0x08283a,
+      roughness: 0.10,
+      metalness: 0.25,
+      emissive: 0x00f0ff,
+      emissiveIntensity: 3.2
+    });
+    this.materials.push(beadMat);
 
     // 3. Build Procedural Body & Motion
-    this.bodyGroup = BodyGeometry.createBody(neutralBodyMat);
+    this.bodyGroup = BodyGeometry.createBody(bodyMat, eyeMat);
     this.bodyMotion = new BodyMotion(this.bodyGroup);
     this.group.add(this.bodyGroup);
 
     // 4. Build Antenna System & Append
-    this.antennaSystem = new AntennaSystem(neutralBodyMat);
+    this.antennaSystem = new AntennaSystem(bodyMat, beadMat);
     this.group.add(this.antennaSystem.group);
 
     // 5. Configure Wing Pivots at thoracic hinge sockets
