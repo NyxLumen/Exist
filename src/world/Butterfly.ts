@@ -66,10 +66,13 @@ export class Butterfly {
   }
 
   public update(delta: number): void {
-    // 1. Procedural 3D flight steering (telemetry source)
-    this.flight.update(delta);
+    // 1. Gather wingbeat feedback from creature to couple into flight propulsion/lift
+    const wingFeedback = this.procedural.getWingbeatFeedback();
 
-    // 2. Procedural creature internal update with rich motion telemetry
+    // 2. State-driven 3D flight dynamics with biophysical coupling
+    this.flight.update(delta, wingFeedback);
+
+    // 3. Procedural creature internal update with rich motion telemetry
     this.procedural.update(delta, this.flight.motionState);
   }
 

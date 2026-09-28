@@ -54,6 +54,9 @@ export class WingAnimation {
   private targetCadence: number = 1.22;
   private bankBias: number = 0;
 
+  // Cached outputs for zero-allocation telemetry coupling
+  public lastOutputs: WingAnimationOutputs | null = null;
+
   public update(delta: number, speed: number = 0, bank: number = 0): WingAnimationOutputs {
     // 1. Modulate cadence gently with flight speed: near-hover ~1.18 Hz, cruise ~1.32 Hz
     this.targetCadence = THREE.MathUtils.lerp(1.18, 1.34, THREE.MathUtils.clamp(speed / 0.6, 0.0, 1.0));
@@ -107,7 +110,7 @@ export class WingAnimation {
     const bodyPitch = -avgFlapVel * 0.0055; // Gentle ~0.028 rad (~1.6 deg) max counter-pitch
     const downstrokeImpulse = leftFore.isDownstroke ? Math.max(0, -avgFlapVel) : 0;
 
-    return {
+    const outputs: WingAnimationOutputs = {
       leftForewing: leftFore,
       rightForewing: rightFore,
       leftHindwing: leftHind,
@@ -116,6 +119,8 @@ export class WingAnimation {
       bodyPitch,
       downstrokeImpulse
     };
+    this.lastOutputs = outputs;
+    return outputs;
   }
 
   /**
@@ -164,7 +169,7 @@ export class WingAnimation {
     const bodyPitch = -avgFlapVel * 0.0055;
     const downstrokeImpulse = leftFore.isDownstroke ? Math.max(0, -avgFlapVel) : 0;
 
-    return {
+    const outputs: WingAnimationOutputs = {
       leftForewing: leftFore,
       rightForewing: rightFore,
       leftHindwing: leftHind,
@@ -173,6 +178,8 @@ export class WingAnimation {
       bodyPitch,
       downstrokeImpulse
     };
+    this.lastOutputs = outputs;
+    return outputs;
   }
 
   /**

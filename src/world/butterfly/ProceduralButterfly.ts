@@ -58,6 +58,14 @@ export class ProceduralButterfly {
   // Internal timeline
   private elapsedTime: number = 0;
 
+  // Reusable scratch feedback for zero-allocation locomotion coupling
+  private readonly _wingbeatFeedback = {
+    flapPhase: 0,
+    flapVelocity: 0,
+    downstrokeImpulse: 0,
+    isDownstroke: false
+  };
+
   // Geometry and material registries for clean lifecycle disposal
   private readonly materials: THREE.Material[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
@@ -311,6 +319,20 @@ export class ProceduralButterfly {
       0,
       stroke.downstrokeImpulse
     );
+  }
+
+  /**
+   * Returns current wingbeat telemetry for flight propulsion/lift coupling with zero allocations.
+   */
+  public getWingbeatFeedback(): { flapPhase: number; flapVelocity: number; downstrokeImpulse: number; isDownstroke: boolean } {
+    const last = this.wingAnimation.lastOutputs;
+    if (last) {
+      this._wingbeatFeedback.flapPhase = last.leftForewing.flapPhase;
+      this._wingbeatFeedback.flapVelocity = last.leftForewing.flapVelocity;
+      this._wingbeatFeedback.downstrokeImpulse = last.downstrokeImpulse;
+      this._wingbeatFeedback.isDownstroke = last.leftForewing.isDownstroke;
+    }
+    return this._wingbeatFeedback;
   }
 
   public dispose(): void {
